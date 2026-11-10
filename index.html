@@ -768,7 +768,11 @@ const ZONES_BASE = [
   {
     id: 'Z-01', area: 35, status: '우수',
     locationType: '북서측 원형광장 부채꼴 파사드',
-    currentBrand: { name: '바샤커피 (Bacha)', category: '카페', pyeongEfficiency: 2400, commissionRate: 18 },
+    currentBrand: {
+      name: '바샤커피 (Bacha)', category: '카페',
+      pyeongEfficiency: 2400, commissionRate: 18,
+      salesCurr: 840000000, salesPrev: 750000000, profitRate: 22,
+    },
     isReplaced: false,
     // 북측 호(Arc)를 따라 휘어진 부채꼴
     path: 'M 70,160 Q 220,100 310,140 L 290,260 L 90,250 Q 70,250 70,160 Z',
@@ -778,7 +782,11 @@ const ZONES_BASE = [
   {
     id: 'Z-02', area: 20, status: '부진',
     locationType: '북동측 사선 챔퍼(Chamfer)',
-    currentBrand: { name: '올드 베이커리', category: '베이커리', pyeongEfficiency: 980, commissionRate: 15 },
+    currentBrand: {
+      name: '올드 베이커리', category: '베이커리',
+      pyeongEfficiency: 980, commissionRate: 15,
+      salesCurr: 196000000, salesPrev: 214000000, profitRate: 11,
+    },
     isReplaced: false,
     // 동측 사선 외벽을 따라 깎인 5각형
     path: 'M 690,130 L 870,110 L 920,230 L 730,260 L 690,180 Z',
@@ -788,7 +796,11 @@ const ZONES_BASE = [
   {
     id: 'Z-03', area: 25, status: '부진',
     locationType: '서측 사선 평행사변형 스트리트',
-    currentBrand: { name: '아메리칸 샌드위치', category: '델리', pyeongEfficiency: 920, commissionRate: 21 },
+    currentBrand: {
+      name: '아메리칸 샌드위치', category: '델리',
+      pyeongEfficiency: 920, commissionRate: 21,
+      salesCurr: 230000000, salesPrev: 237600000, profitRate: 13,
+    },
     isReplaced: false,
     // 기둥 코어를 피해 기울어진 4각형
     path: 'M 75,295 L 265,305 L 285,420 L 90,410 Z',
@@ -798,7 +810,11 @@ const ZONES_BASE = [
   {
     id: 'Z-04', area: 15, status: '부진',
     locationType: '중앙 코어 보이드 유선형 아일랜드',
-    currentBrand: { name: '전통 모나카 부티크', category: '디저트', pyeongEfficiency: 850, commissionRate: 20 },
+    currentBrand: {
+      name: '전통 모나카 부티크', category: '디저트',
+      pyeongEfficiency: 850, commissionRate: 20,
+      salesCurr: 127500000, salesPrev: 122500000, profitRate: 16,
+    },
     isReplaced: false,
     // 유선형 조약돌(Pebble) — 하단을 8px 올려 Z-06과 부딪히지 않게 함
     path: 'M 640,320 C 720,290 760,350 720,390 C 660,420 610,360 640,320 Z',
@@ -808,7 +824,11 @@ const ZONES_BASE = [
   {
     id: 'Z-05', area: 40, status: '보통',
     locationType: '남서측 L자형 대형 식당가',
-    currentBrand: { name: '고든램지 스트리트 버거', category: '다이닝', pyeongEfficiency: 1750, commissionRate: 19 },
+    currentBrand: {
+      name: '고든램지 스트리트 버거', category: '다이닝',
+      pyeongEfficiency: 1750, commissionRate: 19,
+      salesCurr: 700000000, salesPrev: 681600000, profitRate: 17,
+    },
     isReplaced: false,
     // 롯데월드 통로를 품은 L자
     path: 'M 75,450 L 315,460 L 315,580 L 195,580 L 195,515 L 75,510 Z',
@@ -818,7 +838,11 @@ const ZONES_BASE = [
   {
     id: 'Z-06', area: 65, status: '앵커',
     locationType: '남동측 에비뉴엘 연결 사다리꼴',
-    currentBrand: { name: '레피세리 와인 & 마켓', category: '주류/식품', pyeongEfficiency: 1400, commissionRate: 14 },
+    currentBrand: {
+      name: '레피세리 와인 & 마켓', category: '주류/식품',
+      pyeongEfficiency: 1400, commissionRate: 14,
+      salesCurr: 910000000, salesPrev: 968000000, profitRate: 9,
+    },
     isReplaced: false,
     // 동측 사선 외벽을 수용한 사다리꼴
     path: 'M 670,420 L 920,380 L 870,580 L 660,580 Z',
@@ -828,12 +852,12 @@ const ZONES_BASE = [
 ];
 
 const CANDIDATES = [
-  { id: 'C-01', name: '런던베이글뮤지엄', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, tag: '오픈런 1위 앵커', initials: 'LB' },
-  { id: 'C-02', name: '노티드 월드', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, tag: '2030 패밀리 선호', initials: 'KW' },
-  { id: 'C-03', name: '삐아프 쇼콜라', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, tag: '고마진 선물 수요', initials: 'PF' },
-  { id: 'C-04', name: '땀땀 (TamTam)', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, tag: '회전율 보장 맛집', initials: 'TT' },
-  { id: 'C-05', name: '카멜커피', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, tag: 'MZ 바이럴 핫플', initials: 'CC' },
-  { id: 'C-06', name: '트러플 아티장 델리', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, tag: '와인 페어링 고단가', initials: 'TD' },
+  { id: 'C-01', name: '런던베이글뮤지엄', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, profitRate: 19, growthRate: 34.2, tag: '오픈런 1위 앵커', initials: 'LB' },
+  { id: 'C-02', name: '노티드 월드', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, profitRate: 21, growthRate: 18.5, tag: '2030 패밀리 선호', initials: 'KW' },
+  { id: 'C-03', name: '삐아프 쇼콜라', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, profitRate: 26, growthRate: 9.4, tag: '고마진 선물 수요', initials: 'PF' },
+  { id: 'C-04', name: '땀땀 (TamTam)', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, profitRate: 15, growthRate: -2.1, tag: '회전율 보장 맛집', initials: 'TT' },
+  { id: 'C-05', name: '카멜커피', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, profitRate: 18, growthRate: 24.8, tag: 'MZ 바이럴 핫플', initials: 'CC' },
+  { id: 'C-06', name: '트러플 아티장 델리', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, profitRate: 28, growthRate: 6.7, tag: '와인 페어링 고단가', initials: 'TD' },
 ];
 
 const CAT_TAG = {
@@ -859,21 +883,159 @@ const man = (v) => nf.format(Math.round(v));
 const eok = (v, d = 1) => (v / 10000).toFixed(d);
 const signed = (v, d) => `${v > 0 ? '+' : v < 0 ? '-' : ''}${Math.abs(v).toFixed(d)}`;
 
-/** 층 합계 지표. rev·comm 단위는 억 원, eff 는 만 원/평. */
+/** 매출 요약 — 1억 이상은 억, 미만은 만 원 */
+function moneyShort(v) {
+  if (v >= 1e8) {
+    const e = v / 1e8;
+    let t = e >= 10 ? e.toFixed(1) : e.toFixed(2);
+    if (t.indexOf('.') > -1) {
+      t = t.replace(/0+$/, '');
+      if (t.charAt(t.length - 1) === '.') t = t.slice(0, -1);
+    }
+    return `${t}억`;
+  }
+  return `${man(Math.round(v / 1e4))}만`;
+}
+
+/** 신장율(%). 전년 매출이 0 이하이면 null 을 돌려 '신규'로 다룬다. */
+function growthOf(curr, prev) {
+  if (!(prev > 0)) return null;
+  return Math.round((curr / prev) * 1000 - 1000) / 10;
+}
+
+/** 평효율(원/평). 평수가 0 이하이면 0. */
+function efficiencyOf(curr, pyeong) {
+  return pyeong > 0 ? Math.round(curr / pyeong) : 0;
+}
+
+/** 이익액(원) */
+function profitOf(curr, rate) {
+  return Math.round(curr * (rate / 100));
+}
+
+/** 신장율 문자열. null 이면 '신규' */
+function growthText(g) {
+  if (g == null) return '신규';
+  return `${g > 0 ? '+' : ''}${g.toFixed(1)}%`;
+}
+
+/** 신장율 색상 — 상승 초록, 하락 빨강, 신규 회색 */
+function growthColor(g) {
+  if (g == null) return '#94A3B8';
+  if (g > 0) return '#10B981';
+  if (g < 0) return '#EF4444';
+  return '#64748B';
+}
+
+/**
+ * 구역과 브랜드를 합쳐 파생 지표까지 채운 행을 만든다.
+ * 화면·정렬·랭킹이 모두 이 행 하나만 본다.
+ */
+function enrichRow(zone) {
+  const b = zone.currentBrand;
+  const pyeong = zone.area;
+  const salesCurr = typeof b.salesCurr === 'number' ? b.salesCurr : Math.round(pyeong * b.pyeongEfficiency * 1e4);
+  const salesPrev = typeof b.salesPrev === 'number' ? b.salesPrev : 0;
+  const profitRate = typeof b.profitRate === 'number' ? b.profitRate : b.commissionRate;
+  return {
+    zoneId: zone.id,
+    name: b.name,
+    category: b.category,
+    pyeong,
+    salesCurr,
+    salesPrev,
+    profitRate,
+    growthRate: growthOf(salesCurr, salesPrev),
+    efficiency: efficiencyOf(salesCurr, pyeong),
+    profitAmt: profitOf(salesCurr, profitRate),
+    status: zone.status,
+    isReplaced: zone.isReplaced,
+    zone,
+  };
+}
+
+function storeRows(zones) {
+  return zones.map(enrichRow);
+}
+
+/** 층 합계 — rev·profit 단위는 억 원, eff 는 만 원/평 */
 function metricsOf(zones) {
   let rev = 0;
-  let comm = 0;
+  let profit = 0;
   let pyeong = 0;
   zones.forEach((z) => {
-    const r = (z.area * z.currentBrand.pyeongEfficiency) / 10000;
-    rev += r;
-    comm += r * (z.currentBrand.commissionRate / 100);
-    pyeong += z.area;
+    const r = enrichRow(z);
+    rev += r.salesCurr / 1e8;
+    profit += r.profitAmt / 1e8;
+    pyeong += r.pyeong;
   });
-  return { rev, comm, eff: pyeong ? (rev * 10000) / pyeong : 0, pyeong };
+  return {
+    rev,
+    profit,
+    pyeong,
+    eff: pyeong ? (rev * 1e8) / pyeong / 1e4 : 0,
+    profitRate: rev ? (profit / rev) * 100 : 0,
+  };
 }
 
 const cloneBase = () => ZONES_BASE.map((z) => ({ ...z, currentBrand: { ...z.currentBrand } }));
+
+/** 후보 브랜드를 특정 평수 구역에 놓을 때의 브랜드 객체 */
+function brandForZone(cand, area) {
+  const curr = Math.round(area * cand.pyeongEfficiency * 1e4);
+  const g = typeof cand.growthRate === 'number' ? cand.growthRate : null;
+  const prev = g != null && g > -99.9 ? Math.round(curr / (1 + g / 100)) : 0;
+  return {
+    name: cand.name,
+    category: cand.category,
+    pyeongEfficiency: cand.pyeongEfficiency,
+    commissionRate: cand.commissionRate,
+    salesCurr: curr,
+    salesPrev: prev,
+    profitRate: cand.profitRate,
+  };
+}
+
+const SORTS = [
+  { key: 'salesCurr', label: '매출순' },
+  { key: 'growthRate', label: '신장율순' },
+  { key: 'efficiency', label: '평효율순' },
+  { key: 'pyeong', label: '평수순' },
+  { key: 'profitRate', label: '이익율순' },
+  { key: 'profitAmt', label: '이익액순' },
+];
+
+const RANK_COLS = [
+  { key: 'salesCurr', label: '매출 순위', icon: 'TrendingUp', fmt: (v) => moneyShort(v) },
+  { key: 'efficiency', label: '평효율 순위', icon: 'Gauge', fmt: (v) => `${man(Math.round(v / 1e4))}만` },
+  { key: 'profitRate', label: '이익율 순위', icon: 'Percent', fmt: (v) => `${v}%` },
+  { key: 'profitAmt', label: '이익액 순위', icon: 'Wallet', fmt: (v) => moneyShort(v) },
+];
+
+/** 신장율 null(신규)은 정렬 방향과 무관하게 항상 맨 아래로 보낸다. */
+function sortRows(rows, key, dir) {
+  const out = rows.slice();
+  out.sort((a, b) => {
+    const av = a[key];
+    const bv = b[key];
+    if (av == null && bv == null) return 0;
+    if (av == null) return 1;
+    if (bv == null) return -1;
+    return dir === 'asc' ? av - bv : bv - av;
+  });
+  return out;
+}
+
+/** 목록 행에 표시할 정렬 기준 수치 */
+function metricText(row, key) {
+  if (key === 'salesCurr') return moneyShort(row.salesCurr);
+  if (key === 'growthRate') return growthText(row.growthRate);
+  if (key === 'efficiency') return `${man(Math.round(row.efficiency / 1e4))}만`;
+  if (key === 'pyeong') return `${row.pyeong}평`;
+  if (key === 'profitRate') return `${row.profitRate}%`;
+  if (key === 'profitAmt') return moneyShort(row.profitAmt);
+  return '';
+}
 
 /* ================================================================
  * 3. ICONS (lucide UMD 노드 = ['svg', attrs, children])
@@ -945,51 +1107,83 @@ function KpiCapsule({ label, value, unit, delta, deltaUnit, digits, footnote }) 
  * 5. ZONE POLYGON — 비정형 SVG 매장 블록
  * ================================================================ */
 
-function ZoneShape({ zone, hovered, selected, onHover, onApply, onLeave, ghost }) {
+function ZoneShape({
+  zone, row, hovered, selected, dropActive, dragKind,
+  onHover, onLeave, onActivate,
+  onApplyBrand, onSwap, onDragStartZone, onDragEndZone, ghost,
+}) {
+  // 드래그 중일 때만 드롭 표시(빨간 테두리 + 안내 문구)를 켠다
+  const dropMode = dropActive && Boolean(dragKind);
   const replaced = zone.isReplaced;
   const warning = !replaced && zone.status === '부진';
-  const small = zone.id === 'Z-04';
-  const brand = zone.currentBrand;
+  const compact = zone.labelWidth < 130;
+  const small = !compact && zone.labelWidth < 180;
 
-  const fill = replaced ? '#ECFDF5' : hovered ? '#FFF1F2' : '#FFFFFF';
-  const stroke = replaced ? '#059669' : hovered ? '#E60012' : warning ? '#F59E0B' : '#CBD5E1';
-  const strokeWidth = replaced ? 3 : hovered ? 2.6 : 1.5;
+  const fill = replaced ? '#ECFDF5' : dropMode ? '#FFF1F2' : hovered ? '#FFF8F8' : '#FFFFFF';
+  const stroke = dropMode ? '#E60012' : replaced ? '#059669' : hovered ? '#E60012' : warning ? '#F59E0B' : '#CBD5E1';
+  const strokeWidth = dropMode ? 3.4 : replaced ? 3 : hovered ? 2.6 : 1.5;
 
   const { x: cx, y: cy } = zone.center;
-  const nameFs = Math.max(9, Math.min(small ? 12 : 14, (zone.labelWidth * 0.94) / Math.max(1, brand.name.length)));
-  const subFs = small ? 8.5 : 10;
-  const idFs = small ? 8.5 : 10;
-  const revFs = small ? 10.5 : 12;
+  // 지시서: 소형 구획도 10~11px 아래로 내리지 말 것 (line-height 1.2 이내)
+  const fsName = compact ? 11 : small ? 11.5 : 13.5;
+  const fsSub = compact ? 10 : small ? 10 : 10.5;
+  const fsEff = compact ? 10 : small ? 9.5 : 9.5;
+  const fsPyeong = compact ? 10 : small ? 9.5 : 9.5;
+  const lh = compact ? 13.5 : small ? 14 : 15.5;
 
-  const idY = small ? cy - 26 : cy - 32;
-  const nameY = small ? cy + 1 : cy - 2;
-  const subY = small ? cy + 15 : cy + 18;
-  const revY = small ? cy + 29 : cy + 36;
+  const y1 = cy - lh * 1.5;
+  const y2 = cy - lh * 0.5;
+  const y3 = cy + lh * 0.55;
+  const y4 = cy + lh * 1.55;
 
-  const subText = small
-    ? `${man(brand.pyeongEfficiency)}만 · ${brand.commissionRate}%`
-    : `평효율 ${man(brand.pyeongEfficiency)}만 · ${brand.commissionRate}%`;
-
-  const monthly = (zone.area * brand.pyeongEfficiency) / 10000;
+  const nameFs = Math.max(fsName * 0.72, Math.min(fsName, (zone.labelWidth * 0.9) / Math.max(6, row.name.length)));
+  const badgeY = y1 - fsName - 3;
+  const growth = row.growthRate;
+  const gColor = growthColor(growth);
 
   return (
     <g
       role="button"
       tabIndex={0}
       data-zone={zone.id}
-      aria-label={`${zone.id} ${zone.locationType} ${zone.area}평 ${brand.name} ${brand.category} 평효율 ${man(brand.pyeongEfficiency)}만 원 월매출 ${monthly.toFixed(2)}억 원 수수료율 ${brand.commissionRate}퍼센트`}
+      aria-label={`${zone.id} ${zone.locationType} ${row.pyeong}평 ${row.name} ${row.category} 매출 ${moneyShort(row.salesCurr)} 신장율 ${growthText(growth)} 평효율 ${man(Math.round(row.efficiency / 1e4))}만 원 이익율 ${row.profitRate}퍼센트`}
       className="cursor-pointer outline-none"
       onMouseEnter={() => onHover(zone.id)}
       onMouseLeave={onLeave}
-      onClick={() => onApply(zone.id)}
-      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onApply(zone.id); } }}
-      onDragOver={(ev) => { ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; onHover(zone.id); }}
+      onClick={() => onActivate(zone.id)}
+      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onActivate(zone.id); } }}
+      draggable
+      onDragStart={(ev) => {
+        ev.dataTransfer.setData('application/x-zone', zone.id);
+        ev.dataTransfer.effectAllowed = 'move';
+        onDragStartZone(zone.id);
+      }}
+      onDragEnd={onDragEndZone}
+      onDragOver={(ev) => {
+        const types = ev.dataTransfer.types;
+        if (types.includes('application/x-zone') || types.includes('application/json')) {
+          ev.preventDefault();
+          ev.dataTransfer.dropEffect = types.includes('application/x-zone') ? 'move' : 'copy';
+        }
+      }}
       onDrop={(ev) => {
-        ev.preventDefault();
+        const srcZone = ev.dataTransfer.getData('application/x-zone');
+        if (srcZone) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          if (srcZone !== zone.id) onSwap(srcZone, zone.id);
+          return;
+        }
         const raw = ev.dataTransfer.getData('application/json');
-        if (raw) { try { const brand = JSON.parse(raw); onApply(zone.id, brand); } catch (e) { /* 무시 */ } }
+        if (raw) {
+          ev.preventDefault();
+          ev.stopPropagation();
+          try { onApplyBrand(zone.id, JSON.parse(raw)); } catch (err) { onApplyBrand(zone.id, null); }
+        }
       }}
     >
+      <title>{`${zone.id} · ${zone.locationType} · ${row.category}`}</title>
+
       <path
         className="zone-shape"
         d={zone.path}
@@ -1001,40 +1195,45 @@ function ZoneShape({ zone, hovered, selected, onHover, onApply, onLeave, ghost }
         filter="url(#soft-shadow)"
       />
 
-      {/* 선택된 후보가 있으면 매장 위에 드롭 힌트 */}
       {selected ? (
-        <path d={zone.path} fill="none" stroke="#E60012" strokeWidth="2" strokeOpacity="0.45" strokeLinejoin="round" />
+        <path d={zone.path} fill="none" stroke="#E60012" strokeWidth="2.4" strokeOpacity="0.85" strokeLinejoin="round" />
       ) : null}
 
-      {/* NEW 뱃지 / 개편요망 칩 */}
-      {replaced ? (
-        <g transform={`translate(${cx - (small ? 20 : 28)}, ${idY - (small ? 23 : 28)})`}>
-          <rect width={small ? 40 : 56} height={small ? 13 : 15} rx={small ? 6.5 : 7.5} fill="#059669" />
-          <text x={small ? 20 : 28} y={small ? 9.5 : 10.8} textAnchor="middle" fill="#FFFFFF" fontSize={small ? 7.5 : 8.5} fontWeight="900">NEW</text>
+      {dropMode ? (
+        <text x={cx} y={badgeY - 6} textAnchor="middle" fill="#E60012" fontSize={compact ? 8 : 9.5} fontWeight="900" fontFamily="Pretendard, sans-serif">
+          {dragKind === 'zone' ? '⇄ 자리 교환' : '＋ 여기에 입점'}
+        </text>
+      ) : replaced ? (
+        <g transform={`translate(${cx - (compact ? 19 : 24)}, ${badgeY - (compact ? 12 : 14)})`}>
+          <rect width={compact ? 38 : 48} height={compact ? 11 : 13} rx="6" fill="#059669" />
+          <text x={compact ? 19 : 24} y={compact ? 8 : 9.5} textAnchor="middle" fill="#FFFFFF" fontSize={compact ? 6.5 : 7.5} fontWeight="900" fontFamily="Pretendard, sans-serif">NEW</text>
         </g>
       ) : warning ? (
-        <g transform={`translate(${cx - (small ? 24 : 38)}, ${idY - (small ? 23 : 28)})`}>
-          <rect width={small ? 48 : 76} height={small ? 13 : 15} rx={small ? 6.5 : 7.5} fill="#FEF3C7" stroke="#F59E0B" strokeWidth="1" />
-          <text x={small ? 24 : 38} y={small ? 9.5 : 10.8} textAnchor="middle" fill="#B45309" fontSize={small ? 7 : 8} fontWeight="800">
-            {small ? '⚠ 개선' : '⚠ 개편요망'}
+        <g transform={`translate(${cx - (compact ? 22 : 30)}, ${badgeY - (compact ? 12 : 14)})`}>
+          <rect width={compact ? 44 : 60} height={compact ? 11 : 13} rx="6" fill="#FEF3C7" stroke="#F59E0B" strokeWidth="1" />
+          <text x={compact ? 22 : 30} y={compact ? 8 : 9.5} textAnchor="middle" fill="#B45309" fontSize={compact ? 6.5 : 7.5} fontWeight="800" fontFamily="Pretendard, sans-serif">
+            {compact ? '⚠ 개선' : '⚠ 개편요망'}
           </text>
         </g>
       ) : null}
 
-      <text x={cx} y={idY} textAnchor="middle" fill="#64748B" fontSize={idFs} fontWeight="800" fontFamily="Pretendard, sans-serif">
-        {zone.id} · {zone.area}평
+      <text x={cx} y={y1} textAnchor="middle" fill="#0F172A" fontSize={nameFs} fontWeight="900" fontFamily="Pretendard, sans-serif">
+        {row.name}
       </text>
 
-      <text x={cx} y={nameY} textAnchor="middle" fill="#0F172A" fontSize={nameFs} fontWeight="900" fontFamily="Pretendard, sans-serif">
-        {brand.name}
+      <text x={cx} y={y2} textAnchor="middle" fontSize={fsSub} fontWeight="800" fontFamily="Pretendard, sans-serif">
+        <tspan fill="#334155">{`월 ${moneyShort(row.salesCurr)}`}</tspan>
+        <tspan fill="#94A3B8" fontWeight="600">{' / '}</tspan>
+        <tspan fill={gColor}>{growthText(growth)}</tspan>
       </text>
 
-      <text x={cx} y={subY} textAnchor="middle" fill="#64748B" fontSize={subFs} fontWeight="600" fontFamily="Pretendard, sans-serif">
-        {subText}
+      <text x={cx} y={y3} textAnchor="middle" fill="#475569" fontSize={fsEff} fontWeight="700" fontFamily="Pretendard, sans-serif">
+        {`평효율 ${man(Math.round(row.efficiency / 1e4))}만/평`}
       </text>
 
-      <text x={cx} y={revY} textAnchor="middle" fill="#E60012" fontSize={revFs} fontWeight="900" fontFamily="Pretendard, sans-serif">
-        월 {monthly.toFixed(2)}억
+      <text x={cx} y={y4} textAnchor="middle" fontSize={fsPyeong} fontWeight="700" fontFamily="Pretendard, sans-serif">
+        <tspan fill="#0F172A">{`${row.pyeong}평`}</tspan>
+        <tspan fill="#94A3B8" fontWeight="600">{` · ${zone.id}`}</tspan>
       </text>
     </g>
   );
@@ -1047,7 +1246,11 @@ function ZoneShape({ zone, hovered, selected, onHover, onApply, onLeave, ghost }
 const OUTER_PATH = 'M 50,140 Q 500,40 920,110 L 960,380 L 890,620 L 320,620 L 50,560 Z';
 const CORRIDOR = 'M 500,70 Q 400,180 370,280 Q 340,410 520,500 L 610,625';
 
-function FloorPlan({ zones, hovered, selected, onHover, onApply, onLeave, plan, showZones, analysis, showTrace, showRegions }) {
+function FloorPlan({
+  rows, hovered, selectedZoneId, dropZoneId, dragZoneId, candidateDrag,
+  onHover, onLeave, onActivate, onApplyBrand, onSwap, onDragStartZone, onDragEndZone,
+  plan, showZones, analysis, showTrace, showRegions,
+}) {
   // DXF처럼 배경 이미지 없이 벡터 라인만 있는 도면도 '업로드됨'으로 취급한다
   const uploaded = Boolean(plan);
 
@@ -1143,15 +1346,22 @@ function FloorPlan({ zones, hovered, selected, onHover, onApply, onLeave, plan, 
       {/* 6개 비정형 매장 */}
       {showZones ? (
         <g>
-          {zones.map((zone) => (
+          {rows.map((row) => (
             <ZoneShape
-              key={zone.id}
-              zone={zone}
-              hovered={hovered === zone.id}
-              selected={selected}
+              key={row.zoneId}
+              zone={row.zone}
+              row={row}
+              hovered={hovered === row.zoneId}
+              selected={selectedZoneId === row.zoneId}
+              dropActive={dropZoneId === row.zoneId}
+              dragKind={dragZoneId ? 'zone' : candidateDrag ? 'candidate' : null}
               onHover={onHover}
-              onApply={onApply}
               onLeave={onLeave}
+              onActivate={onActivate}
+              onApplyBrand={onApplyBrand}
+              onSwap={onSwap}
+              onDragStartZone={onDragStartZone}
+              onDragEndZone={onDragEndZone}
               ghost={uploaded}
             />
           ))}
@@ -1188,7 +1398,7 @@ function FloorPlan({ zones, hovered, selected, onHover, onApply, onLeave, plan, 
  * 7. CANDIDATE CARD
  * ================================================================ */
 
-function CandidateCard({ brand, selected, usedCount, onSelect, onDragStart }) {
+function CandidateCard({ brand, selected, usedCount, onSelect, onDragStart, onDragEnd }) {
   return (
     <div
       role="button"
@@ -1199,8 +1409,9 @@ function CandidateCard({ brand, selected, usedCount, onSelect, onDragStart }) {
       onDragStart={(ev) => {
         ev.dataTransfer.setData('application/json', JSON.stringify(brand));
         ev.dataTransfer.effectAllowed = 'copy';
-        onDragStart(brand);
+        if (onDragStart) onDragStart(brand);
       }}
+      onDragEnd={() => { if (onDragEnd) onDragEnd(); }}
       onClick={() => onSelect(brand.id)}
       onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onSelect(brand.id); } }}
       className={`cand-card flex cursor-grab items-center justify-between gap-2 rounded-xl border p-2.5 active:cursor-grabbing ${
@@ -1245,6 +1456,249 @@ function CandidateCard({ brand, selected, usedCount, onSelect, onDragStart }) {
  * 8. APP
  * ================================================================ */
 
+/* ================================================================
+ * 9. BRAND LIST PANEL — 검색 + 정렬
+ * ================================================================ */
+
+function BrandRow({ row, selected, sortKey, onSelect, onDragStartZone, onDragEndZone }) {
+  const g = row.growthRate;
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      draggable
+      aria-pressed={selected}
+      aria-label={`${row.zoneId} ${row.name} ${row.pyeong}평 매출 ${moneyShort(row.salesCurr)} 신장율 ${growthText(g)}`}
+      onClick={() => onSelect(row.zoneId)}
+      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onSelect(row.zoneId); } }}
+      onDragStart={(ev) => {
+        ev.dataTransfer.setData('application/x-zone', row.zoneId);
+        ev.dataTransfer.effectAllowed = 'move';
+        if (onDragStartZone) onDragStartZone(row.zoneId);
+      }}
+      onDragEnd={onDragEndZone}
+      className={`cursor-grab rounded-xl border p-2.5 transition active:cursor-grabbing ${
+        selected ? 'border-rose-400 bg-rose-50/60 ring-1 ring-rose-200' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+      }`}
+    >
+      <div className="flex items-center justify-between gap-2">
+        <div className="flex min-w-0 items-center gap-1.5">
+          <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[9.5px] font-black text-slate-500">{row.zoneId}</span>
+          <span className="truncate text-[12px] font-extrabold text-slate-800">{row.name}</span>
+        </div>
+        <span
+          className={`shrink-0 text-[11px] font-black tabular ${
+            sortKey === 'salesCurr' ? 'text-slate-900' : 'text-slate-400'
+          }`}
+        >
+          {moneyShort(row.salesCurr)}
+        </span>
+      </div>
+
+      <div className="mt-1 flex items-center justify-between gap-2 text-[10px] font-bold tabular">
+        <span style={{ color: growthColor(g) }} className={sortKey === 'growthRate' ? 'font-black' : ''}>
+          {growthText(g)}
+        </span>
+        <span className={sortKey === 'efficiency' ? 'text-slate-900' : 'text-slate-500'}>
+          {`${man(Math.round(row.efficiency / 1e4))}만/평`}
+        </span>
+        <span className={sortKey === 'pyeong' ? 'text-slate-900' : 'text-slate-500'}>{`${row.pyeong}평`}</span>
+        <span className={sortKey === 'profitRate' ? 'text-slate-900' : 'text-slate-500'}>{`${row.profitRate}%`}</span>
+        <span className={sortKey === 'profitAmt' ? 'text-slate-900' : 'text-slate-500'}>{moneyShort(row.profitAmt)}</span>
+      </div>
+    </div>
+  );
+}
+
+function BrandListPanel({
+  rows, visibleRows, query, onQuery, sortKey, onSortKey, sortDir, onToggleDir,
+  selectedZoneId, onSelect, tab, onTab,
+  candidates, selectedCandidate, usedCounts, onSelectCandidate,
+  onDragStart, onDragEndZone, onCandidateDragStart, onCandidateDragEnd,
+}) {
+  return (
+    <div className="flex min-h-0 min-w-0 flex-col border-l border-slate-200 bg-white">
+      <div className="flex shrink-0 items-center gap-1 border-b border-slate-200 px-3 pt-3">
+        <button
+          type="button"
+          onClick={() => onTab('brands')}
+          className={`rounded-t-lg px-3 py-1.5 text-[11.5px] font-black transition ${
+            tab === 'brands' ? 'border-b-2 border-rose-500 text-slate-900' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          브랜드 목록
+          <span className="ml-1 text-[10px] font-bold text-slate-400">{rows.length}</span>
+        </button>
+        <button
+          type="button"
+          onClick={() => onTab('candidates')}
+          className={`rounded-t-lg px-3 py-1.5 text-[11.5px] font-black transition ${
+            tab === 'candidates' ? 'border-b-2 border-rose-500 text-slate-900' : 'text-slate-400 hover:text-slate-600'
+          }`}
+        >
+          교체 후보
+          <span className="ml-1 text-[10px] font-bold text-slate-400">{candidates.length}</span>
+        </button>
+      </div>
+
+      {tab === 'brands' ? (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 space-y-1.5 border-b border-slate-100 p-3">
+            <div className="relative">
+              <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">
+                <Icon name="Search" size={13} />
+              </span>
+              <input
+                type="search"
+                value={query}
+                onChange={(ev) => onQuery(ev.target.value)}
+                placeholder="브랜드명 검색..."
+                aria-label="브랜드명 검색"
+                className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-2.5 text-[11.5px] font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-500"
+              />
+            </div>
+
+            <div className="flex items-center gap-1.5">
+              <select
+                value={sortKey}
+                onChange={(ev) => onSortKey(ev.target.value)}
+                aria-label="정렬 기준"
+                className="min-w-0 flex-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[11.5px] font-bold text-slate-700 outline-none focus:border-slate-500"
+              >
+                {SORTS.map((o) => (
+                  <option key={o.key} value={o.key}>{o.label}</option>
+                ))}
+              </select>
+              <button
+                type="button"
+                onClick={onToggleDir}
+                aria-label={sortDir === 'desc' ? '내림차순 — 누르면 오름차순' : '오름차순 — 누르면 내림차순'}
+                title={sortDir === 'desc' ? '내림차순' : '오름차순'}
+                className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-black text-slate-600 transition hover:bg-slate-50 active:scale-95"
+              >
+                <Icon name={sortDir === 'desc' ? 'ArrowDown' : 'ArrowUp'} size={12} stroke={2.6} />
+                {sortDir === 'desc' ? '내림' : '오름'}
+              </button>
+            </div>
+          </div>
+
+          <div className="custom-scrollbar flex min-h-0 flex-1 flex-col gap-1.5 overflow-y-auto p-3">
+            {visibleRows.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-slate-50/60 py-8 text-center">
+                <p className="text-[11.5px] font-bold text-slate-500">일치하는 브랜드가 없습니다.</p>
+                <p className="mt-1 text-[10.5px] text-slate-400">검색어를 지우면 전체 {rows.length}개가 다시 나옵니다</p>
+              </div>
+            ) : (
+              visibleRows.map((row) => (
+                <BrandRow
+                  key={row.zoneId}
+                  row={row}
+                  selected={selectedZoneId === row.zoneId}
+                  sortKey={sortKey}
+                  onSelect={onSelect}
+                  onDragStartZone={onDragStart}
+                  onDragEndZone={onDragEndZone}
+                />
+              ))
+            )}
+          </div>
+
+          <div className="shrink-0 border-t border-slate-100 px-3 py-2 text-[10px] font-semibold text-slate-400">
+            항목을 클릭하면 도면에서 강조되고, 도면 구역 위로 끌어다 놓으면 자리가 바뀝니다
+          </div>
+        </div>
+      ) : (
+        <div className="flex min-h-0 flex-1 flex-col">
+          <div className="min-h-0 flex-1 overflow-y-auto p-3 custom-scrollbar">
+            <div className="flex flex-col gap-2">
+              {candidates.map((brand) => (
+                <CandidateCard
+                  key={brand.id}
+                  brand={brand}
+                  selected={selectedCandidate === brand.id}
+                  usedCount={usedCounts[brand.name] || 0}
+                  onSelect={(id) => onSelectCandidate((cur) => (cur === id ? null : id))}
+                  onDragStart={onCandidateDragStart}
+                  onDragEnd={onCandidateDragEnd}
+                />
+              ))}
+            </div>
+          </div>
+          <div className="shrink-0 border-t border-slate-100 px-3 py-2 text-[10px] font-semibold text-slate-400">
+            카드를 도면 구역에 끌어다 놓거나, 카드 선택 후 구역을 클릭하세요
+          </div>
+        </div>
+      )}
+    </div>
+  );
+}
+
+/* ================================================================
+ * 10. RANKING DASHBOARD — 4대 지표 순위
+ * ================================================================ */
+
+function RankingColumn({ col, rows, selectedZoneId, onSelect }) {
+  const sorted = sortRows(rows, col.key, 'desc');
+  return (
+    <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-slate-50/80 px-2.5 py-1.5">
+        <span className="flex items-center gap-1.5 text-[11px] font-black text-slate-700">
+          <span className="text-slate-400"><Icon name={col.icon} size={12} /></span>
+          {col.label}
+        </span>
+        <span className="text-[9.5px] font-bold text-slate-400">내림차순</span>
+      </div>
+
+      <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-1.5">
+        {sorted.map((row, i) => {
+          const active = selectedZoneId === row.zoneId;
+          const medal = i === 0 ? '#B45309' : i === 1 ? '#64748B' : i === 2 ? '#92400E' : '#CBD5E1';
+          return (
+            <button
+              key={row.zoneId}
+              type="button"
+              onClick={() => onSelect(row.zoneId)}
+              aria-label={`${i + 1}위 ${row.name} ${col.label} ${col.fmt(row[col.key])}`}
+              className={`mb-1 flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left transition ${
+                active ? 'bg-rose-50 ring-1 ring-rose-200' : 'hover:bg-slate-50'
+              }`}
+            >
+              <span
+                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-black"
+                style={{ background: `color-mix(in srgb, ${medal} 14%, white)`, color: medal }}
+              >
+                {i + 1}
+              </span>
+              <span className="min-w-0 flex-1 truncate text-[10.5px] font-bold text-slate-700">{row.name}</span>
+              <span className="shrink-0 text-[10.5px] font-black tabular text-slate-900">{col.fmt(row[col.key])}</span>
+            </button>
+          );
+        })}
+      </div>
+    </div>
+  );
+}
+
+function RankingDashboard({ rows, selectedZoneId, onSelect }) {
+  return (
+    <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
+      <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-2">
+        <h2 className="flex items-center gap-2 text-[11.5px] font-black text-slate-900">
+          <span className="h-2 w-2 rounded-full bg-rose-500" />
+          Dash Board
+          <span className="text-[10px] font-bold text-slate-400">4대 지표 순위</span>
+        </h2>
+        <span className="text-[10px] font-bold text-slate-400">층 전체 {rows.length}개 구역 기준</span>
+      </div>
+      <div className="grid min-h-0 flex-1 grid-cols-4 gap-2 p-2">
+        {RANK_COLS.map((col) => (
+          <RankingColumn key={col.key} col={col} rows={rows} selectedZoneId={selectedZoneId} onSelect={onSelect} />
+        ))}
+      </div>
+    </div>
+  );
+}
+
 function App() {
   const [zones, setZones] = useState(cloneBase);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
@@ -1259,6 +1713,13 @@ function App() {
   const [showTrace, setShowTrace] = useState(true);
   const [showRegions, setShowRegions] = useState(false);
   const [drawHover, setDrawHover] = useState(false);
+  const [selectedZoneId, setSelectedZoneId] = useState(null);
+  const [dragZoneId, setDragZoneId] = useState(null);
+  const [candidateDrag, setCandidateDrag] = useState(false);
+  const [tab, setTab] = useState('brands');
+  const [query, setQuery] = useState('');
+  const [sortKey, setSortKey] = useState('salesCurr');
+  const [sortDir, setSortDir] = useState('desc');
   const fileRef = useRef(null);
   const planUrlRef = useRef(null);
 
@@ -1287,18 +1748,63 @@ function App() {
     toastTimer.current = setTimeout(() => setToast(null), 1900);
   }, []);
 
-  const handleApply = useCallback((zoneId, brandArg) => {
-    const brand = brandArg || CANDIDATES.find((c) => c.id === selectedCandidate);
-    if (!brand) { notify('오른쪽 후보 브랜드를 먼저 선택해 주세요'); return; }
-    setZones((prev) => prev.map((z) => (
-      z.id === zoneId
-        ? { ...z, currentBrand: { name: brand.name, category: brand.category, pyeongEfficiency: brand.pyeongEfficiency, commissionRate: brand.commissionRate }, isReplaced: true }
-        : z
-    )));
+  /** 어떤 브랜드든 주어진 평수에 맞춰 매출을 다시 계산한다 */
+  const rebaseBrand = useCallback((brand, area) => {
+    const curr = Math.round(area * brand.pyeongEfficiency * 1e4);
+    const ratio = brand.salesCurr > 0 && brand.salesPrev > 0 ? brand.salesCurr / brand.salesPrev : null;
+    const prev = ratio ? Math.round(curr / ratio) : 0;
+    return { ...brand, salesCurr: curr, salesPrev: prev };
+  }, []);
+
+  /** 구역 클릭 — 후보가 선택돼 있으면 그 자리에 입점, 아니면 하이라이트 */
+  const handleActivate = useCallback((zoneId) => {
+    const cand = CANDIDATES.find((c) => c.id === selectedCandidate);
+    if (!cand) {
+      setSelectedZoneId((cur) => (cur === zoneId ? null : zoneId));
+      return;
+    }
+    setZones((prev) => prev.map((z) => {
+      if (z.id !== zoneId) return z;
+      return { ...z, currentBrand: brandForZone(cand, z.area), isReplaced: true };
+    }));
     setSelectedCandidate(null);
-    setHoveredZoneId(null);
-    notify(`${zoneId} · ${brand.name} 적용`);
+    setSelectedZoneId(zoneId);
+    notify(`${zoneId} · ${cand.name} 입점`);
   }, [selectedCandidate, notify]);
+
+  /** 후보 브랜드 드롭 */
+  const handleApplyBrand = useCallback((zoneId, brand) => {
+    if (!brand) { notify('후보 브랜드 정보를 읽지 못했습니다'); return; }
+    setZones((prev) => prev.map((z) => {
+      if (z.id !== zoneId) return z;
+      return { ...z, currentBrand: brandForZone(brand, z.area), isReplaced: true };
+    }));
+    setSelectedZoneId(zoneId);
+    notify(`${zoneId} · ${brand.name} 입점`);
+  }, [notify]);
+
+  /** 구역 ↔ 구역 브랜드 자리 교환 (평수가 다르면 매출을 새 면적으로 재계산) */
+  const handleSwap = useCallback((fromId, toId) => {
+    setZones((prev) => {
+      const a = prev.find((z) => z.id === fromId);
+      const b = prev.find((z) => z.id === toId);
+      if (!a || !b) return prev;
+      // A 구역은 B 의 브랜드를 받고, B 구역은 A 의 브랜드를 받는다.
+      // 매출은 받는 구역의 평수로 다시 계산해야 평효율이 유지된다.
+      const brandForA = rebaseBrand(b.currentBrand, a.area);
+      const brandForB = rebaseBrand(a.currentBrand, b.area);
+      const baseA = ZONES_BASE.find((z) => z.id === fromId);
+      const baseB = ZONES_BASE.find((z) => z.id === toId);
+      return prev.map((z) => {
+        if (z.id === fromId) return { ...z, currentBrand: brandForA, isReplaced: brandForA.name !== baseA.currentBrand.name };
+        if (z.id === toId) return { ...z, currentBrand: brandForB, isReplaced: brandForB.name !== baseB.currentBrand.name };
+        return z;
+      });
+    });
+    setDragZoneId(null);
+    setSelectedZoneId(toId);
+    notify(`${fromId} ⇄ ${toId} 자리 교환`);
+  }, [rebaseBrand, notify]);
 
   const handleRevert = useCallback((zoneId) => {
     setZones((prev) => prev.map((z) => {
@@ -1459,15 +1965,27 @@ function App() {
     notify('초기 도면으로 복원했습니다');
   }, [notify]);
 
-  const replacedZones = zones.filter((z) => z.isReplaced);
+  const rows = useMemo(() => storeRows(zones), [zones]);
+
+  // 드래그 중일 때만 드롭 대상 구역을 표시한다 (단순 호버와 분리)
+  const isDragging = Boolean(dragZoneId) || candidateDrag;
+  const dropTargetId = isDragging ? hoveredZoneId : null;
   const deltaRev = currentMetrics.rev - initialMetrics.rev;
   const deltaEff = currentMetrics.eff - initialMetrics.eff;
-  const deltaComm = currentMetrics.comm - initialMetrics.comm;
+  const deltaProfit = currentMetrics.profit - initialMetrics.profit;
+
+  const visibleRows = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    const filtered = q
+      ? rows.filter((r) => r.name.toLowerCase().includes(q) || r.category.toLowerCase().includes(q) || r.zoneId.toLowerCase().includes(q))
+      : rows;
+    return sortRows(filtered, sortKey, sortDir);
+  }, [rows, query, sortKey, sortDir]);
 
   return (
     <div className="flex h-full flex-col bg-[#F8FAFC]">
       {/* ---------- HEADER ---------- */}
-      <header className="z-20 flex h-[74px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white/90 px-8 backdrop-blur-md">
+      <header className="z-20 flex h-[74px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white/90 px-6 backdrop-blur-md">
         <div className="flex shrink-0 items-center gap-3">
           <span className="rounded-lg bg-lotte-red px-2.5 py-1 text-xs font-black tracking-wider text-white shadow-sm">LOTTE</span>
           <div>
@@ -1475,11 +1993,11 @@ function App() {
               MD Floor-Tetris
               <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">잠실점 B1 평면 CAD</span>
             </h1>
-            <p className="text-[11px] font-semibold text-slate-400">비정형 다각형 도면 기반 실시간 평효율 시뮬레이터</p>
+            <p className="text-[11px] font-semibold text-slate-400">층별 도면 기반 입점 브랜드 실적 · 신장율 조회</p>
           </div>
         </div>
 
-        <div className="flex items-center gap-3">
+        <div className="flex items-center gap-2.5">
           <KpiCapsule
             label="층 예상 월 총매출"
             value={currentMetrics.rev.toFixed(1)}
@@ -1499,13 +2017,13 @@ function App() {
             footnote={`기준 ${man(initialMetrics.eff)}만`}
           />
           <KpiCapsule
-            label="백화점 월 수수료"
-            value={currentMetrics.comm.toFixed(2)}
+            label="총 이익액 (평균 이익율)"
+            value={currentMetrics.profit.toFixed(2)}
             unit="억"
-            delta={deltaComm}
+            delta={deltaProfit}
             deltaUnit="억"
             digits={2}
-            footnote={`평균 수수료율 ${(currentMetrics.comm / currentMetrics.rev * 100).toFixed(1)}%`}
+            footnote={`평균 이익율 ${currentMetrics.profitRate.toFixed(1)}%`}
           />
         </div>
 
@@ -1519,11 +2037,11 @@ function App() {
         </button>
       </header>
 
-      {/* ---------- BODY ---------- */}
-      <div className="flex min-h-0 flex-1 overflow-hidden">
-        {/* 좌: 비정형 SVG 평면도 */}
-        <div className="flex min-w-0 flex-[7] flex-col p-5">
-          <div className="cad-canvas-bg flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
+      {/* ---------- BODY : 도면(좌상) + 대시보드(좌하) + 브랜드목록(우) ---------- */}
+      <div className="flex min-h-0 flex-1 gap-3 overflow-hidden p-3">
+        {/* 좌: 도면 + Dash Board */}
+        <div className="flex min-h-0 min-w-0 flex-[1_1_73%] flex-col gap-3">
+          <div className="cad-canvas-bg flex min-h-0 flex-[7] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/90 px-4 py-2 text-xs font-semibold text-slate-500 backdrop-blur-sm">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="flex min-w-0 items-center gap-1.5 font-bold text-slate-700">
@@ -1613,7 +2131,7 @@ function App() {
             </div>
 
             <div
-              className={`relative flex min-h-0 flex-1 items-center justify-center p-3 transition ${
+              className={`relative flex min-h-0 flex-1 items-center justify-center p-2 transition ${
                 drawHover ? 'bg-rose-50/50 ring-2 ring-inset ring-rose-300' : ''
               }`}
               onDragOver={(ev) => {
@@ -1636,12 +2154,19 @@ function App() {
               }}
             >
               <FloorPlan
-                zones={zones}
+                rows={rows}
                 hovered={hoveredZoneId}
-                selected={selectedCandidate}
+                selectedZoneId={selectedZoneId}
+                dropZoneId={dropTargetId}
+                dragZoneId={dragZoneId}
+                candidateDrag={candidateDrag}
                 onHover={setHoveredZoneId}
-                onApply={handleApply}
                 onLeave={() => setHoveredZoneId(null)}
+                onActivate={handleActivate}
+                onApplyBrand={handleApplyBrand}
+                onSwap={handleSwap}
+                onDragStartZone={setDragZoneId}
+                onDragEndZone={() => setDragZoneId(null)}
                 plan={plan}
                 showZones={showZones}
                 analysis={analysis}
@@ -1649,16 +2174,8 @@ function App() {
                 showRegions={showRegions}
               />
 
-              {!plan ? (
-                <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
-                  <span className="rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10.5px] font-semibold text-slate-400 backdrop-blur-sm">
-                    DXF · SVG · PDF · PNG · JPG 파일을 여기로 끌어다 놓아도 됩니다
-                  </span>
-                </div>
-              ) : null}
-
               {drawHover ? (
-                <div className="pointer-events-none absolute inset-3 flex items-center justify-center rounded-xl border-2 border-rose-300 bg-white/70 ring-4 ring-rose-200/60">
+                <div className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-xl border-2 border-rose-300 bg-white/70 ring-4 ring-rose-200/60">
                   <span className="text-sm font-black text-rose-600">여기에 놓으면 도면으로 적용됩니다</span>
                 </div>
               ) : null}
@@ -1671,7 +2188,7 @@ function App() {
               ) : null}
 
               {parseError ? (
-                <div className="absolute inset-x-4 bottom-4 z-10 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
+                <div className="absolute inset-x-4 bottom-3 z-10 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2">
                   <Icon name="AlertCircle" size={14} className="mt-0.5 shrink-0 text-rose-500" />
                   <div className="min-w-0 flex-1">
                     <p className="text-[11.5px] font-bold text-rose-800">도면을 해석하지 못했습니다</p>
@@ -1689,8 +2206,8 @@ function App() {
               ) : null}
             </div>
 
-            <div className="flex shrink-0 items-center justify-between border-t border-slate-100 px-5 py-2 text-[10.5px] font-semibold text-slate-400">
-              <div className="flex items-center gap-3.5">
+            <div className="flex shrink-0 items-center justify-between border-t border-slate-100 px-4 py-1.5 text-[10px] font-semibold text-slate-400">
+              <div className="flex items-center gap-3">
                 <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm border border-slate-300 bg-white" />현행</span>
                 <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-amber-400" />개편 필요</span>
                 <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-emerald-500" />신규 교체</span>
@@ -1702,86 +2219,40 @@ function App() {
                     {analysis.stats.regions ? ` · 영역 ${analysis.stats.regions}` : ''}
                   </span>
                 ) : null}
-                <span>6개 구역 · {currentMetrics.pyeong}평 · 교체 {replacedZones.length}건</span>
+                <span>{rows.length}개 구역 · {currentMetrics.pyeong}평 · 교체 {rows.filter((r) => r.isReplaced).length}건</span>
               </div>
             </div>
+          </div>
+
+          <div className="min-h-0 flex-[3]">
+            <RankingDashboard rows={rows} selectedZoneId={selectedZoneId} onSelect={setSelectedZoneId} />
           </div>
         </div>
 
-        {/* 우: 후보 브랜드 + 변경 내역 */}
-        <div className="flex min-h-0 w-[30%] min-w-[360px] max-w-[460px] shrink-0 flex-col border-l border-slate-200 bg-white">
-          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-5">
-            <div className="mb-3 flex shrink-0 items-center justify-between">
-              <h2 className="flex items-center gap-2 text-xs font-black text-slate-900">
-                <span className="h-2 w-2 rounded-full bg-rose-500" />
-                신규 입점 대기 후보 브랜드
-              </h2>
-              <span className="text-[11px] font-bold text-slate-400">{CANDIDATES.length}개 대기</span>
-            </div>
-
-            <div className="custom-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
-              {CANDIDATES.map((brand) => (
-                <CandidateCard
-                  key={brand.id}
-                  brand={brand}
-                  selected={selectedCandidate === brand.id}
-                  usedCount={usedCounts[brand.name] || 0}
-                  onSelect={(id) => setSelectedCandidate((cur) => (cur === id ? null : id))}
-                  onDragStart={() => setSelectedCandidate(null)}
-                />
-              ))}
-            </div>
-          </div>
-
-          <div className="shrink-0 border-t border-slate-200 bg-slate-50/60 p-5">
-            <h3 className="mb-2 flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-700">
-              <span>MD 개편 변경 내역</span>
-              <span className="font-semibold text-slate-400">{replacedZones.length}개 교체</span>
-            </h3>
-
-            {replacedZones.length === 0 ? (
-              <div className="rounded-xl border border-slate-200 bg-white py-5 text-center">
-                <p className="text-xs font-semibold text-slate-500">교체된 구역이 없습니다</p>
-                <p className="mt-1 text-[10.5px] leading-relaxed text-slate-400">도면에 후보 브랜드를 드롭하거나<br />매장을 클릭해 적용하세요</p>
-              </div>
-            ) : (
-              <div className="custom-scrollbar max-h-[150px] space-y-1.5 overflow-y-auto">
-                {replacedZones.map((z) => {
-                  const base = ZONES_BASE.find((b) => b.id === z.id);
-                  const before = (z.area * base.currentBrand.pyeongEfficiency) / 10000;
-                  const after = (z.area * z.currentBrand.pyeongEfficiency) / 10000;
-                  const diff = after - before;
-                  return (
-                    <div key={z.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
-                      <div className="min-w-0">
-                        <p className="truncate text-[11px] font-extrabold text-slate-800">
-                          {z.id} <span className="font-semibold text-slate-400">({z.area}평)</span>
-                          <span className="mx-1 text-slate-300">→</span>
-                          <span className="text-emerald-700">{z.currentBrand.name}</span>
-                        </p>
-                        <p className="text-[10px] font-medium tabular text-slate-400">
-                          {before.toFixed(2)}억 → {after.toFixed(2)}억
-                        </p>
-                      </div>
-                      <div className="flex shrink-0 items-center gap-1.5">
-                        <span className={`text-[11px] font-black tabular ${diff >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
-                          {signed(diff, 2)}억
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => handleRevert(z.id)}
-                          aria-label={`${z.id} 원래 브랜드로 되돌리기`}
-                          className="flex h-5 w-5 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600"
-                        >
-                          <Icon name="X" size={11} stroke={2.6} />
-                        </button>
-                      </div>
-                    </div>
-                  );
-                })}
-              </div>
-            )}
-          </div>
+        {/* 우: 브랜드 목록 (검색 + 정렬) / 교체 후보 */}
+        <div className="flex min-h-0 w-[27%] min-w-[300px] max-w-[400px] shrink-0 flex-col">
+          <BrandListPanel
+            rows={rows}
+            visibleRows={visibleRows}
+            query={query}
+            onQuery={setQuery}
+            sortKey={sortKey}
+            onSortKey={setSortKey}
+            sortDir={sortDir}
+            onToggleDir={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+            selectedZoneId={selectedZoneId}
+            onSelect={setSelectedZoneId}
+            tab={tab}
+            onTab={setTab}
+            candidates={CANDIDATES}
+            selectedCandidate={selectedCandidate}
+            usedCounts={usedCounts}
+            onSelectCandidate={setSelectedCandidate}
+            onDragStart={setDragZoneId}
+            onDragEndZone={() => setDragZoneId(null)}
+            onCandidateDragStart={() => setCandidateDrag(true)}
+            onCandidateDragEnd={() => setCandidateDrag(false)}
+          />
         </div>
       </div>
 
