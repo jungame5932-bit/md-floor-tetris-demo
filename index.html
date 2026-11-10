@@ -50,6 +50,56 @@
   .custom-scrollbar::-webkit-scrollbar { width: 5px; }
   .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
   .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+
+  /* 인라인 수치 편집기 */
+  .inline-editor {
+    width: 100%;
+    border: 1px solid #E60012;
+    border-radius: 4px;
+    background: #FFFFFF;
+    padding: 0 2px;
+    font: inherit;
+    font-variant-numeric: tabular-nums;
+    text-align: right;
+    color: #0F172A;
+    outline: none;
+  }
+  .inline-editor.invalid {
+    border-color: #EF4444;
+    animation: shake 0.5s ease-in-out;
+  }
+  @keyframes shake {
+    0%, 100% { transform: translateX(0); }
+    20% { transform: translateX(-3px); }
+    40% { transform: translateX(3px); }
+    60% { transform: translateX(-2px); }
+    80% { transform: translateX(2px); }
+  }
+  @keyframes swapPulse {
+    0% { opacity: 1; }
+    40% { opacity: 0.35; }
+    100% { opacity: 1; }
+  }
+  .swap-pulse { animation: swapPulse 0.4s ease-in-out; }
+
+  /* 드래그 고스트 */
+  #dragGhost {
+    position: fixed;
+    z-index: 9999;
+    pointer-events: none;
+    transform: translate(-50%, -140%);
+    border-radius: 8px;
+    border: 1px solid #E60012;
+    background: rgba(255, 255, 255, 0.97);
+    padding: 5px 9px;
+    font-size: 11px;
+    font-weight: 800;
+    color: #0F172A;
+    box-shadow: 0 6px 18px -6px rgba(15, 23, 42, 0.35);
+    white-space: nowrap;
+  }
+  .zone-dragging { opacity: 0.4; }
+  .zone-dragging .zone-shape { stroke-dasharray: 5, 5; }
   .zone-shape { transition: fill .16s ease, stroke .16s ease, stroke-width .16s ease; }
   .cand-card { transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease, background .15s ease; }
   .cand-card:hover { transform: translateY(-1px); }
@@ -84,6 +134,41 @@ window.PlanParser = (function () {
     }
     if (!isFinite(minX)) return { x: 0, y: 0, w: 1, h: 1 };
     return { x: minX, y: minY, w: Math.max(maxX - minX, 1e-6), h: Math.max(maxY - minY, 1e-6) };
+  }
+
+  /** 신발끈 공식 — 다각형 면적 */
+  function polyArea(pts) {
+    var a = 0;
+    for (var i = 0, n = pts.length; i < n; i++) {
+      var p = pts[i], q = pts[(i + 1) % n];
+      a += p[0] * q[1] - q[0] * p[1];
+    }
+    return Math.abs(a) / 2;
+  }
+
+  /** 닫힌 폴리라인 집합 → 구획 영역 후보 (면적·바운딩박스 부착) */
+  function regionsFromPolys(polys) {
+    var out = [];
+    for (var i = 0; i < polys.length; i++) {
+      var p = polys[i];
+      if (!p || !p.closed || !p.pts || p.pts.length < 3) continue;
+      var a = polyArea(p.pts);
+      if (!(a > 0)) continue;
+      var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+      for (var k = 0; k < p.pts.length; k++) {
+        var x = p.pts[k][0], y = p.pts[k][1];
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+      out.push({
+        pts: p.pts,
+        area: a,
+        bbox: { x: minX, y: minY, w: maxX - minX, h: maxY - minY },
+        closed: true,
+      });
+    }
+    out.sort(function (m, n) { return n.area - m.area; });
+    return out;
   }
 
   /** 폴리라인 집합을 target 박스에 맞춰 정규화. flipY 는 DXF(수학좌표) 대응. */
@@ -404,8 +489,15 @@ window.PlanParser = (function () {
     var svg = host.querySelector('svg');
     if (!svg) { document.body.removeChild(host); throw new Error('SVG 루트 엘리먼트를 찾지 못했습니다'); }
 
-    if (!svg.getAttribute('width')) svg.setAttribute('width', '1600');
-    if (!svg.getAttribute('height')) svg.setAttribute('height', '1200');
+    // viewBox 가 있으면 그 크기로 렌더해 내부 letterbox 를 없앤다 (추적선과 배경 정합)
+    var vbb0 = svg.viewBox && svg.viewBox.baseVal;
+    if (vbb0 && vbb0.width > 0 && vbb0.height > 0) {
+      svg.setAttribute('width', String(vbb0.width));
+      svg.setAttribute('height', String(vbb0.height));
+    } else {
+      if (!svg.getAttribute('width')) svg.setAttribute('width', '1600');
+      if (!svg.getAttribute('height')) svg.setAttribute('height', '1200');
+    }
 
     var root = svg.getScreenCTM();
     if (!root) { document.body.removeChild(host); throw new Error('SVG 좌표계를 읽지 못했습니다'); }
@@ -435,21 +527,63 @@ window.PlanParser = (function () {
         pts.push([q.x, q.y]);
       }
       budget -= n;
-      polys.push({ pts: pts, closed: tag === 'polygon' || tag === 'rect' || tag === 'circle' || tag === 'ellipse', layer: 'svg' });
+      // 닫힌 도형만 구획 후보가 된다 — rect/polygon/circle, 그리고 Z 로 닫힌 path
+      var closed = tag === 'polygon' || tag === 'rect' || tag === 'circle' || tag === 'ellipse';
+      if (!closed && tag === 'path') {
+        closed = /[zZ]\s*$/.test(String(el.getAttribute('d') || '').trim());
+      }
+      if (!closed && pts.length > 3) {
+        // 폴리라인이 사실상 닫혀 있으면(시작=끝) 닫힌 것으로 본다
+        var dx = pts[0][0] - pts[pts.length - 1][0];
+        var dy = pts[0][1] - pts[pts.length - 1][1];
+        closed = Math.hypot(dx, dy) < 2;
+      }
+      polys.push({ pts: pts, closed: closed, layer: 'svg' });
       counts[tag] = (counts[tag] || 0) + 1;
     }
 
     document.body.removeChild(host);
 
     var fittedSvg = fit(polys, tw, th, pad, false);
+
+    // 원본 SVG 를 배경으로 깔 때 추적선과 정확히 겹치도록 이미지 사각형을 계산한다
+    var vb = null;
+    try {
+      var vbb = svg.viewBox && svg.viewBox.baseVal;
+      if (vbb && vbb.width > 0 && vbb.height > 0) vb = { x: vbb.x, y: vbb.y, w: vbb.width, h: vbb.height };
+    } catch (e) { vb = null; }
+    if (!vb) {
+      vb = {
+        x: 0, y: 0,
+        w: parseFloat(svg.getAttribute('width')) || fittedSvg.bbox.w,
+        h: parseFloat(svg.getAttribute('height')) || fittedSvg.bbox.h,
+      };
+    }
+    var sc = fittedSvg.scale;
+    var ox = (tw - fittedSvg.bbox.w * sc) / 2;
+    var oy = (th - fittedSvg.bbox.h * sc) / 2;
+    var rect = {
+      x: ox + (vb.x - fittedSvg.bbox.x) * sc,
+      y: oy + (vb.y - fittedSvg.bbox.y) * sc,
+      w: vb.w * sc,
+      h: vb.h * sc,
+    };
+
+    // 도면 안의 닫힌 도형 = 매장 구획 후보
+    var regions = regionsFromPolys(fittedSvg.polys)
+      .filter(function (r) { return r.area >= 60 && r.bbox.w >= 5 && r.bbox.h >= 5; });
+
     return {
       polys: fittedSvg.polys,
+      regions: regions,
+      rect: rect,
       stats: {
         format: 'SVG',
         entities: els.length,
         lines: polys.length,
         layers: ['svg'],
         units: 'px',
+        regions: regions.length,
         extents: { w: Math.round(fittedSvg.bbox.w), h: Math.round(fittedSvg.bbox.h) },
         byType: counts,
       },
@@ -745,6 +879,8 @@ window.PlanParser = (function () {
   return {
     parseDxf: parseDxf,
     svgToPolys: svgToPolys,
+    regionsFromPolys: regionsFromPolys,
+    polyArea: polyArea,
     traceRaster: traceRaster,
     toPathData: toPathData,
     bboxOf: bboxOf,
@@ -978,7 +1114,11 @@ function metricsOf(zones) {
   };
 }
 
-const cloneBase = () => ZONES_BASE.map((z) => ({ ...z, currentBrand: { ...z.currentBrand } }));
+const cloneBase = () => ZONES_BASE.map((z) => ({
+  ...z,
+  currentBrand: { ...z.currentBrand },
+  originBrand: { ...z.currentBrand },
+}));
 
 /** 후보 브랜드를 특정 평수 구역에 놓을 때의 브랜드 객체 */
 function brandForZone(cand, area) {
@@ -996,6 +1136,123 @@ function brandForZone(cand, area) {
   };
 }
 
+/* ================================================================
+ * 도면에서 읽은 구획 → 구역 객체
+ * ================================================================ */
+
+const PLAN_TOTAL_PYEONG = 200;
+
+/** 다각형 무게중심 (면적 가중) — 라벨을 도형 가운데에 놓기 위함 */
+function centroidOf(pts) {
+  let a = 0, cx = 0, cy = 0;
+  for (let i = 0, n = pts.length; i < n; i++) {
+    const p = pts[i], q = pts[(i + 1) % n];
+    const cross = p[0] * q[1] - q[0] * p[1];
+    a += cross;
+    cx += (p[0] + q[0]) * cross;
+    cy += (p[1] + q[1]) * cross;
+  }
+  if (Math.abs(a) < 1e-9) {
+    const xs = pts.map((p) => p[0]);
+    const ys = pts.map((p) => p[1]);
+    return { x: (Math.min(...xs) + Math.max(...xs)) / 2, y: (Math.min(...ys) + Math.max(...ys)) / 2 };
+  }
+  return { x: cx / (3 * a), y: cy / (3 * a) };
+}
+
+/** 좌표 배열 → SVG path d */
+function pathFromPts(pts) {
+  const r = (v) => Math.round(v * 100) / 100;
+  return 'M ' + pts.map((p) => `${r(p[0])},${r(p[1])}`).join(' L ') + ' Z';
+}
+
+/** 브랜드를 주어진 평수에 맞춰 배치 — 평효율은 유지하고 매출만 다시 계산 */
+function brandAtPyeong(brand, area) {
+  const src = brand || {};
+  const curr0 = typeof src.salesCurr === 'number' && src.salesCurr > 0
+    ? src.salesCurr
+    : Math.round(area * (src.pyeongEfficiency || 1000) * 1e4);
+  const eff = typeof src.pyeongEfficiency === 'number' && src.pyeongEfficiency > 0
+    ? src.pyeongEfficiency
+    : curr0 / Math.max(1, area) / 1e4;
+  const curr = Math.round(area * eff * 1e4);
+  const prev0 = typeof src.salesPrev === 'number' ? src.salesPrev : 0;
+  const g = growthOf(curr0, prev0);
+  const prev = g != null && g > -99.9 ? Math.round(curr / (1 + g / 100)) : prev0;
+  return {
+    name: src.name || '미정',
+    category: src.category || '기타',
+    pyeongEfficiency: eff,
+    commissionRate: typeof src.commissionRate === 'number' ? src.commissionRate : 16,
+    salesCurr: curr,
+    salesPrev: prev,
+    profitRate: typeof src.profitRate === 'number' ? src.profitRate : (src.commissionRate || 16),
+  };
+}
+
+/**
+ * 업로드한 도면에서 추출한 구획을 그대로 구역으로 세운다.
+ * 도면의 물리적 위치·모양을 쓰고, 평수는 구획面積 비율로 총 평수를 배분한다.
+ * 브랜드는 기존 풀을 순서대로 물려받되 새 평수로 매출을 재계산한다.
+ */
+function zonesFromRegions(regions, brandPool, totalPyeong) {
+  if (!regions || !regions.length) return null;
+  // 벽·기둥 같은 잔휘 조각을 걸러내고 큰 구획만 쓴다
+  const list0 = regions
+    .filter((r) => r && r.pts && r.pts.length >= 3 && r.area > 0)
+    .slice(0, 16);
+  if (!list0.length) return null;
+
+  // 도면 전체를 덮는 배경/외벽 사각형은 구획이 아니다
+  const all = list0.reduce((acc, r) => {
+    const x0 = r.bbox.x, y0 = r.bbox.y, x1 = r.bbox.x + r.bbox.w, y1 = r.bbox.y + r.bbox.h;
+    return {
+      x0: Math.min(acc.x0, x0), y0: Math.min(acc.y0, y0),
+      x1: Math.max(acc.x1, x1), y1: Math.max(acc.y1, y1),
+    };
+  }, { x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity });
+  const canvasArea = Math.max(1, (all.x1 - all.x0) * (all.y1 - all.y0));
+  const areaSumAll = list0.reduce((s, r) => s + r.area, 0) || 1;
+
+  const list = list0.filter((r) => {
+    const cover = (r.bbox.w * r.bbox.h) / canvasArea;
+    const share = r.area / areaSumAll;
+    // 도면의 65% 이상을 덮거나, 전체의 60% 이상 면적이면 배경/외벽으로 본다
+    return cover < 0.65 && share < 0.6;
+  }).slice(0, 12);
+  if (!list.length) return null;
+
+  const total = totalPyeong || PLAN_TOTAL_PYEONG;
+  const areaSum = list.reduce((s, r) => s + r.area, 0) || 1;
+
+  const out = list.map((r, i) => {
+    const pyeong = Math.max(1, Math.round((r.area / areaSum) * total));
+    return {
+      id: `Z-${String(i + 1).padStart(2, '0')}`,
+      area: pyeong,
+      status: '보통',
+      locationType: `도면 구획 ${i + 1}`,
+      path: pathFromPts(r.pts),
+      center: centroidOf(r.pts),
+      labelWidth: Math.max(70, Math.min(r.bbox.w * 0.92, 240)),
+      currentBrand: null,
+      isReplaced: false,
+    };
+  });
+
+  // 반올림 오차를 가장 큰 구획에 몰아넣어 합계를 총평수에 맞춘다
+  const diff = total - out.reduce((s, z) => s + z.area, 0);
+  out[0].area = Math.max(1, out[0].area + diff);
+
+  const pool = brandPool && brandPool.length ? brandPool : ZONES_BASE.map((z) => z.currentBrand);
+  out.forEach((z, i) => {
+    const brand = brandAtPyeong(pool[i % pool.length], z.area);
+    z.currentBrand = brand;
+    z.originBrand = { ...brand };
+  });
+  return out;
+}
+
 const SORTS = [
   { key: 'salesCurr', label: '매출순' },
   { key: 'growthRate', label: '신장율순' },
@@ -1005,12 +1262,91 @@ const SORTS = [
   { key: 'profitAmt', label: '이익액순' },
 ];
 
-const RANK_COLS = [
-  { key: 'salesCurr', label: '매출 순위', icon: 'TrendingUp', fmt: (v) => moneyShort(v) },
-  { key: 'efficiency', label: '평효율 순위', icon: 'Gauge', fmt: (v) => `${man(Math.round(v / 1e4))}만` },
-  { key: 'profitRate', label: '이익율 순위', icon: 'Percent', fmt: (v) => `${v}%` },
-  { key: 'profitAmt', label: '이익액 순위', icon: 'Wallet', fmt: (v) => moneyShort(v) },
+/**
+ * 대시보드·정렬·편집이 공유하는 지표 정의.
+ * unit  : 'won' | 'wonPerPyeong' | 'percent' | 'pyeong'
+ * edit  : 인라인 편집을 허용할지 (파생 전용 지표는 읽기 전용)
+ */
+const METRICS = [
+  { key: 'salesCurr', label: '매출', icon: 'TrendingUp', unit: 'won', editable: true, fmt: (v) => moneyShort(v) },
+  { key: 'efficiency', label: '평효율', icon: 'Gauge', unit: 'wonPerPyeong', editable: true, fmt: (v) => `${man(Math.round(v / 1e4))}만` },
+  { key: 'profitRate', label: '이익율', icon: 'Percent', unit: 'percent', editable: true, fmt: (v) => `${Number(v.toFixed(1))}%` },
+  { key: 'profitAmt', label: '이익액', icon: 'Wallet', unit: 'won', editable: true, fmt: (v) => moneyShort(v) },
+  { key: 'growthRate', label: '신장율', icon: 'LineChart', unit: 'percent', editable: false, fmt: (v) => growthText(v) },
+  { key: 'salesPrev', label: '전년매출', icon: 'History', unit: 'won', editable: true, fmt: (v) => moneyShort(v) },
+  { key: 'pyeong', label: '평수', icon: 'Ruler', unit: 'pyeong', editable: false, fmt: (v) => `${v}평` },
 ];
+
+const METRIC_BY_KEY = {};
+METRICS.forEach((m) => { METRIC_BY_KEY[m.key] = m; });
+
+const DEFAULT_COLUMNS = ['salesCurr', 'efficiency', 'profitRate', 'profitAmt'];
+
+function metricFmt(key, v) {
+  const m = METRIC_BY_KEY[key];
+  return m ? m.fmt(v) : String(v);
+}
+
+/**
+ * 인라인 입력값을 지표 단위로 해석한다.
+ * 반환: { ok, value } — 실패하면 원래 값으로 롤백해야 한다.
+ */
+function parseMetricInput(key, raw, row) {
+  const text = String(raw == null ? '' : raw).trim().replace(/,/g, '').replace(/[%\s원평]/g, '');
+  if (text === '' || text === '-' || text === '.') return { ok: false };
+  const num = Number(text);
+  if (!Number.isFinite(num) || num < 0) return { ok: false };
+  const unit = (METRIC_BY_KEY[key] || {}).unit;
+  let value = num;
+  if (unit === 'won') value = Math.round(num);
+  else if (unit === 'wonPerPyeong') value = Math.round(num * 1e4);
+  else if (unit === 'percent') value = Math.round(num * 10) / 10;
+  else if (unit === 'pyeong') value = Math.round(num);
+  if (!Number.isFinite(value) || value < 0) return { ok: false };
+  return { ok: true, value };
+}
+
+/** 입력값을 화면 표시용 원시 숫자로 (편집기 초기값) */
+function metricEditValue(key, row) {
+  const unit = (METRIC_BY_KEY[key] || {}).unit;
+  if (unit === 'won') return String(Math.round(row[key]));
+  if (unit === 'wonPerPyeong') return String(Math.round(row[key] / 1e4));
+  if (unit === 'percent') return String(Number(Number(row[key]).toFixed(1)));
+  if (unit === 'pyeong') return String(row[key]);
+  return String(row[key]);
+}
+
+/**
+ * 지표 하나를 수정했을 때 브랜드 원천값(salesCurr/salesPrev/profitRate)을 역산한다.
+ * 지시서 Step 2 의 네 가지 규칙을 그대로 구현한다.
+ * 반환: 새 브랜드 객체, 또는 null(변경 불가)
+ */
+function applyMetricEdit(brand, pyeong, key, value) {
+  const b = { ...brand };
+  const curr = typeof b.salesCurr === 'number' ? b.salesCurr : 0;
+  const prev = typeof b.salesPrev === 'number' ? b.salesPrev : 0;
+  const rate = typeof b.profitRate === 'number' ? b.profitRate : 0;
+
+  if (key === 'salesCurr') {
+    // 매출 직접 수정 → 신장율·평효율·이익액은 파생이라 자동 갱신된다
+    b.salesCurr = Math.round(value);
+  } else if (key === 'efficiency') {
+    // 목표 평효율 시뮬레이션 → 매출을 역산
+    if (!(pyeong > 0)) return null;
+    b.salesCurr = Math.round(value * pyeong);
+  } else if (key === 'profitRate') {
+    b.profitRate = Math.min(100, Math.max(0, Math.round(value * 10) / 10));
+  } else if (key === 'profitAmt') {
+    // 이익액 직접 수정 → 이익율을 역산
+    if (!(curr > 0)) return null;
+    b.profitRate = Math.min(100, Math.max(0, Math.round((value / curr) * 1000) / 10));
+  } else if (key === 'salesPrev') {
+    b.salesPrev = Math.round(value);
+  } else {
+    return null;
+  }
+  return b;
+}
 
 /** 신장율 null(신규)은 정렬 방향과 무관하게 항상 맨 아래로 보낸다. */
 function sortRows(rows, key, dir) {
@@ -1108,9 +1444,11 @@ function KpiCapsule({ label, value, unit, delta, deltaUnit, digits, footnote }) 
  * ================================================================ */
 
 function ZoneShape({
-  zone, row, hovered, selected, dropActive, dragKind,
+  zone, row, hovered, selected, dropActive, dragKind, dragging, pulsing,
+  pointerDragEnabled,
   onHover, onLeave, onActivate,
-  onApplyBrand, onSwap, onDragStartZone, onDragEndZone, ghost,
+  onApplyBrand, onSwap, onDragStartZone, onDragEndZone,
+  onPointerDragStart, ghost,
 }) {
   // 드래그 중일 때만 드롭 표시(빨간 테두리 + 안내 문구)를 켠다
   const dropMode = dropActive && Boolean(dragKind);
@@ -1146,8 +1484,13 @@ function ZoneShape({
       role="button"
       tabIndex={0}
       data-zone={zone.id}
+      className={`zone-group cursor-pointer outline-none ${dragging ? 'zone-dragging' : ''} ${pulsing ? 'swap-pulse' : ''}`}
+      onMouseDown={(ev) => {
+        if (!pointerDragEnabled) return;
+        if (ev.button !== 0) return;
+        onPointerDragStart(ev, zone.id, row);
+      }}
       aria-label={`${zone.id} ${zone.locationType} ${row.pyeong}평 ${row.name} ${row.category} 매출 ${moneyShort(row.salesCurr)} 신장율 ${growthText(growth)} 평효율 ${man(Math.round(row.efficiency / 1e4))}만 원 이익율 ${row.profitRate}퍼센트`}
-      className="cursor-pointer outline-none"
       onMouseEnter={() => onHover(zone.id)}
       onMouseLeave={onLeave}
       onClick={() => onActivate(zone.id)}
@@ -1248,7 +1591,9 @@ const CORRIDOR = 'M 500,70 Q 400,180 370,280 Q 340,410 520,500 L 610,625';
 
 function FloorPlan({
   rows, hovered, selectedZoneId, dropZoneId, dragZoneId, candidateDrag,
+  pulseZone, pointerDragEnabled,
   onHover, onLeave, onActivate, onApplyBrand, onSwap, onDragStartZone, onDragEndZone,
+  onPointerDragStart,
   plan, showZones, analysis, showTrace, showRegions,
 }) {
   // DXF처럼 배경 이미지 없이 벡터 라인만 있는 도면도 '업로드됨'으로 취급한다
@@ -1355,6 +1700,9 @@ function FloorPlan({
               selected={selectedZoneId === row.zoneId}
               dropActive={dropZoneId === row.zoneId}
               dragKind={dragZoneId ? 'zone' : candidateDrag ? 'candidate' : null}
+              dragging={dragZoneId === row.zoneId}
+              pulsing={pulseZone === row.zoneId}
+              pointerDragEnabled={pointerDragEnabled}
               onHover={onHover}
               onLeave={onLeave}
               onActivate={onActivate}
@@ -1362,6 +1710,7 @@ function FloorPlan({
               onSwap={onSwap}
               onDragStartZone={onDragStartZone}
               onDragEndZone={onDragEndZone}
+              onPointerDragStart={onPointerDragStart}
               ghost={uploaded}
             />
           ))}
@@ -1634,44 +1983,155 @@ function BrandListPanel({
 }
 
 /* ================================================================
- * 10. RANKING DASHBOARD — 4대 지표 순위
+ * 10. RANKING DASHBOARD — 편집 가능한 지표 순위 보드
  * ================================================================ */
 
-function RankingColumn({ col, rows, selectedZoneId, onSelect }) {
-  const sorted = sortRows(rows, col.key, 'desc');
+function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
+  const [editing, setEditing] = React.useState(false);
+  const [draft, setDraft] = React.useState('');
+  const [invalid, setInvalid] = React.useState(false);
+  const inputRef = React.useRef(null);
+  const metric = METRIC_BY_KEY[metricKey];
+  const canEdit = Boolean(metric && metric.editable);
+
+  const start = () => {
+    setDraft(metricEditValue(metricKey, row));
+    setEditing(true);
+    setInvalid(false);
+    if (onSelectZone) onSelectZone();
+  };
+
+  React.useEffect(() => {
+    if (editing && inputRef.current) {
+      inputRef.current.focus();
+      inputRef.current.select();
+    }
+  }, [editing]);
+
+  const commit = () => {
+    const parsed = parseMetricInput(metricKey, draft, row);
+    if (!parsed.ok) {
+      // 비정상 입력: 저장하지 않고 붉게 흔든 뒤 원래 값 유지
+      setInvalid(true);
+      if (inputRef.current) inputRef.current.select();
+      window.setTimeout(() => { setInvalid(false); setEditing(false); }, 500);
+      return;
+    }
+    setEditing(false);
+    onCommit(metricKey, parsed.value);
+  };
+
+  if (editing) {
+    return (
+      <input
+        ref={inputRef}
+        type="number"
+        className={`inline-editor ${invalid ? 'invalid' : ''}`}
+        value={draft}
+        step="any"
+        onChange={(ev) => setDraft(ev.target.value)}
+        onBlur={commit}
+        onClick={(ev) => ev.stopPropagation()}
+        onDoubleClick={(ev) => ev.stopPropagation()}
+        onKeyDown={(ev) => {
+          ev.stopPropagation();
+          if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+          if (ev.key === 'Escape') {
+            ev.preventDefault();
+            setEditing(false);
+            setInvalid(false);
+          }
+        }}
+        aria-label={`${row.name} ${metric ? metric.label : ''} 수정`}
+      />
+    );
+  }
+
+  return (
+    <span
+      role={canEdit ? 'button' : undefined}
+      tabIndex={canEdit ? 0 : undefined}
+      title={canEdit ? '더블클릭하여 수정' : '파생 지표 (읽기 전용)'}
+      onClick={(ev) => { ev.stopPropagation(); if (canEdit) start(); }}
+      onDoubleClick={(ev) => { ev.stopPropagation(); if (canEdit) start(); }}
+      onKeyDown={(ev) => { if (canEdit && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); start(); } }}
+      className={`shrink-0 text-[10.5px] font-black tabular text-slate-900 ${
+        canEdit ? 'cursor-text rounded px-0.5 hover:bg-rose-50' : 'cursor-default opacity-80'
+      }`}
+    >
+      {value}
+    </span>
+  );
+}
+
+function RankingColumn({
+  col, rows, limit, dir, selectedZoneId, onSelect, onCommitValue, onHeaderChange, onHeaderRemove, canRemove, pulseZone,
+}) {
+  const sorted = sortRows(rows, col.key, dir);
+  const shown = limit > 0 ? sorted.slice(0, limit) : sorted;
+  const metric = METRIC_BY_KEY[col.key] || { label: col.key, icon: 'Activity' };
+
   return (
     <div className="flex min-h-0 min-w-0 flex-col overflow-hidden rounded-xl border border-slate-200 bg-white">
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-100 bg-slate-50/80 px-2.5 py-1.5">
-        <span className="flex items-center gap-1.5 text-[11px] font-black text-slate-700">
-          <span className="text-slate-400"><Icon name={col.icon} size={12} /></span>
-          {col.label}
-        </span>
-        <span className="text-[9.5px] font-bold text-slate-400">내림차순</span>
+      <div className="flex shrink-0 items-center gap-1 border-b border-slate-100 bg-slate-50/80 px-1.5 py-1">
+        <span className="shrink-0 text-slate-400"><Icon name={metric.icon} size={11} /></span>
+        <select
+          value={col.key}
+          onChange={(ev) => onHeaderChange(col.key, ev.target.value)}
+          aria-label="지표 컬럼 변경"
+          className="min-w-0 flex-1 cursor-pointer truncate rounded border border-transparent bg-transparent px-0.5 py-0.5 text-[10.5px] font-black text-slate-700 outline-none hover:border-slate-300 hover:bg-white focus:border-slate-400"
+        >
+          {METRICS.map((m) => (
+            <option key={m.key} value={m.key}>{m.label} 순위</option>
+          ))}
+        </select>
+        {canRemove ? (
+          <button
+            type="button"
+            onClick={() => onHeaderRemove(col.key)}
+            aria-label={`${metric.label} 컬럼 삭제`}
+            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-slate-300 transition hover:bg-rose-50 hover:text-rose-600"
+          >
+            <Icon name="X" size={10} stroke={2.8} />
+          </button>
+        ) : null}
       </div>
 
-      <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-1.5">
-        {sorted.map((row, i) => {
+      <div className="custom-scrollbar min-h-0 flex-1 overflow-y-auto p-1">
+        {shown.map((row, i) => {
           const active = selectedZoneId === row.zoneId;
+          const pulsing = pulseZone === row.zoneId;
           const medal = i === 0 ? '#B45309' : i === 1 ? '#64748B' : i === 2 ? '#92400E' : '#CBD5E1';
           return (
-            <button
+            <div
               key={row.zoneId}
-              type="button"
+              role="button"
+              tabIndex={0}
               onClick={() => onSelect(row.zoneId)}
-              aria-label={`${i + 1}위 ${row.name} ${col.label} ${col.fmt(row[col.key])}`}
-              className={`mb-1 flex w-full items-center gap-1.5 rounded-lg px-1.5 py-1 text-left transition ${
+              onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); onSelect(row.zoneId); } }}
+              aria-label={`${i + 1}위 ${row.name} ${metric.label} ${metricFmt(col.key, row[col.key])}`}
+              className={`mb-0.5 flex w-full cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-left transition ${
                 active ? 'bg-rose-50 ring-1 ring-rose-200' : 'hover:bg-slate-50'
-              }`}
+              } ${pulsing ? 'swap-pulse' : ''}`}
             >
               <span
-                className="flex h-4 w-4 shrink-0 items-center justify-center rounded-full text-[9px] font-black"
+                className="flex h-3.5 w-3.5 shrink-0 items-center justify-center rounded-full text-[8.5px] font-black"
                 style={{ background: `color-mix(in srgb, ${medal} 14%, white)`, color: medal }}
               >
                 {i + 1}
               </span>
-              <span className="min-w-0 flex-1 truncate text-[10.5px] font-bold text-slate-700">{row.name}</span>
-              <span className="shrink-0 text-[10.5px] font-black tabular text-slate-900">{col.fmt(row[col.key])}</span>
-            </button>
+              <span className="min-w-0 flex-1 truncate text-[10px] font-bold text-slate-700">
+                {row.name}
+                {row.edited ? <span className="ml-1 inline-block h-1 w-1 rounded-full bg-rose-500 align-middle" title="수정됨" /> : null}
+              </span>
+              <InlineValue
+                row={row}
+                metricKey={col.key}
+                value={metricFmt(col.key, row[col.key])}
+                onCommit={(key, v) => onCommitValue(row.zoneId, key, v)}
+                onSelectZone={() => onSelect(row.zoneId)}
+              />
+            </div>
           );
         })}
       </div>
@@ -1679,21 +2139,90 @@ function RankingColumn({ col, rows, selectedZoneId, onSelect }) {
   );
 }
 
-function RankingDashboard({ rows, selectedZoneId, onSelect }) {
+function RankingDashboard({
+  rows, columns, limit, dir, selectedZoneId, onSelect,
+  onCommitValue, onHeaderChange, onHeaderRemove, onAddColumn, onLimit, onToggleDir, pulseZone,
+}) {
+  const unused = METRICS.filter((m) => !columns.includes(m.key));
+
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
-      <div className="flex shrink-0 items-center justify-between border-b border-slate-100 px-4 py-2">
+      <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
         <h2 className="flex items-center gap-2 text-[11.5px] font-black text-slate-900">
           <span className="h-2 w-2 rounded-full bg-rose-500" />
           Dash Board
-          <span className="text-[10px] font-bold text-slate-400">4대 지표 순위</span>
+          <span className="text-[10px] font-bold text-slate-400">지표 순위 · 수치 더블클릭 편집</span>
         </h2>
-        <span className="text-[10px] font-bold text-slate-400">층 전체 {rows.length}개 구역 기준</span>
+
+        <div className="flex items-center gap-1.5">
+          <div className="flex items-center rounded-lg border border-slate-200 bg-slate-50 p-0.5">
+            {[
+              { v: 3, label: 'Top 3' },
+              { v: 5, label: 'Top 5' },
+              { v: 0, label: '전체' },
+            ].map((o) => (
+              <button
+                key={o.label}
+                type="button"
+                onClick={() => onLimit(o.v)}
+                aria-pressed={limit === o.v}
+                className={`rounded-md px-1.5 py-0.5 text-[10px] font-black transition ${
+                  limit === o.v ? 'bg-white text-slate-900 shadow-sm' : 'text-slate-500 hover:text-slate-700'
+                }`}
+              >
+                {o.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            onClick={onToggleDir}
+            aria-label={dir === 'desc' ? '내림차순 — 누르면 오름차순' : '오름차순 — 누르면 내림차순'}
+            className="flex items-center gap-1 rounded-lg border border-slate-200 bg-white px-1.5 py-1 text-[10px] font-black text-slate-600 transition hover:bg-slate-50 active:scale-95"
+          >
+            <Icon name={dir === 'desc' ? 'ArrowDown' : 'ArrowUp'} size={11} stroke={2.6} />
+            {dir === 'desc' ? '상위' : '하위'}
+          </button>
+
+          <span className="text-[10px] font-bold text-slate-400">{rows.length}개 구역</span>
+        </div>
       </div>
-      <div className="grid min-h-0 flex-1 grid-cols-4 gap-2 p-2">
-        {RANK_COLS.map((col) => (
-          <RankingColumn key={col.key} col={col} rows={rows} selectedZoneId={selectedZoneId} onSelect={onSelect} />
+
+      <div className="custom-scrollbar flex min-h-0 flex-1 items-stretch gap-2 overflow-x-auto p-2">
+        {columns.map((key) => (
+          <div key={key} className="flex min-h-0 w-[calc((100%-1.5rem)/4)] min-w-[168px] shrink-0 flex-col">
+            <RankingColumn
+              col={{ key }}
+              rows={rows}
+              limit={limit}
+              dir={dir}
+              selectedZoneId={selectedZoneId}
+              onSelect={onSelect}
+              onCommitValue={onCommitValue}
+              onHeaderChange={onHeaderChange}
+              onHeaderRemove={onHeaderRemove}
+              canRemove={columns.length > 1}
+              pulseZone={pulseZone}
+            />
+          </div>
         ))}
+
+        <button
+          type="button"
+          onClick={onAddColumn}
+          disabled={unused.length === 0}
+          aria-label="지표 컬럼 추가"
+          title={unused.length === 0 ? '추가할 지표가 없습니다' : `추가 가능: ${unused.map((m) => m.label).join(', ')}`}
+          className={`flex w-[92px] shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-slate-300 bg-white text-[10px] font-black transition ${
+            unused.length === 0
+              ? 'cursor-not-allowed border-slate-200 text-slate-300'
+              : 'text-slate-500 hover:border-rose-400 hover:bg-rose-50 hover:text-rose-600 active:scale-95'
+          }`}
+        >
+          <Icon name="Plus" size={14} stroke={2.6} />
+          {unused.length === 0 ? '지표 모두 표시' : '지표 추가'}
+        </button>
       </div>
     </div>
   );
@@ -1720,10 +2249,18 @@ function App() {
   const [query, setQuery] = useState('');
   const [sortKey, setSortKey] = useState('salesCurr');
   const [sortDir, setSortDir] = useState('desc');
+  const [columns, setColumns] = useState(DEFAULT_COLUMNS);
+  const [rankLimit, setRankLimit] = useState(3);
+  const [rankDir, setRankDir] = useState('desc');
+  const [pulseZone, setPulseZone] = useState(null);
+  const [areaMode, setAreaMode] = useState('efficiency'); // 'efficiency' | 'absolute'
+  const [editingAny, setEditingAny] = useState(false);
+  const [editedZones, setEditedZones] = useState({});     // { Z-01: true }
+  const pulseTimer = useRef(null);
   const fileRef = useRef(null);
   const planUrlRef = useRef(null);
 
-  const initialMetrics = useMemo(() => metricsOf(ZONES_BASE), []);
+  const [baseline, setBaseline] = useState(() => metricsOf(ZONES_BASE));
   const currentMetrics = useMemo(() => metricsOf(zones), [zones]);
 
   const usedCounts = useMemo(() => {
@@ -1748,13 +2285,163 @@ function App() {
     toastTimer.current = setTimeout(() => setToast(null), 1900);
   }, []);
 
+  /** 구역을 잠깐 펄스로 강조 (스왑 피드백) */
+  const pulse = useCallback((zoneId) => {
+    setPulseZone(zoneId);
+    if (pulseTimer.current) clearTimeout(pulseTimer.current);
+    pulseTimer.current = setTimeout(() => setPulseZone(null), 420);
+  }, []);
+
+  /* ---------------- SVG 포인터 드래그 (5px 임계값) ---------------- */
+  const dragRef = useRef(null);
+  const [dragTargetId, setDragTargetId] = useState(null);
+
+  const endPointerDrag = useCallback((commit) => {
+    const st = dragRef.current;
+    dragRef.current = null;
+    if (!st) return;
+    document.removeEventListener('mousemove', st.onMove);
+    document.removeEventListener('mouseup', st.onUp);
+    const ghost = document.getElementById('dragGhost');
+    if (ghost) ghost.remove();
+    setDragTargetId(null);
+    setDragZoneId(null);
+    setCandidateDrag(false);
+    if (commit && st.active && st.targetId && st.targetId !== st.sourceId) {
+      handleSwapRef.current(st.sourceId, st.targetId);
+    }
+  }, []);
+
+  const handlePointerDragStart = useCallback((ev, zoneId, row) => {
+    if (editingAny) {
+      // 인라인 편집 중이면 드래그를 시작하지 않는다 (지시서 Step 4 엣지케이스)
+      return;
+    }
+    ev.preventDefault();
+    const startX = ev.clientX;
+    const startY = ev.clientY;
+    let active = false;
+    let targetId = null;
+    let ghostEl = null;
+
+    const hitTest = (x, y) => {
+      const el = document.elementFromPoint(x, y);
+      if (!el) return null;
+      const g = el.closest ? el.closest('g[data-zone]') : null;
+      return g ? g.getAttribute('data-zone') : null;
+    };
+
+    const onMove = (me) => {
+      const dist = Math.hypot(me.clientX - startX, me.clientY - startY);
+      if (!active && dist >= 5) {
+        active = true;
+        setDragZoneId(zoneId);
+        ghostEl = document.createElement('div');
+        ghostEl.id = 'dragGhost';
+        ghostEl.textContent = `${row.name} · ${moneyShort(row.salesCurr)}`;
+        document.body.appendChild(ghostEl);
+      }
+      if (!active) return;
+      if (ghostEl) {
+        ghostEl.style.left = `${me.clientX}px`;
+        ghostEl.style.top = `${me.clientY}px`;
+      }
+      const hit = hitTest(me.clientX, me.clientY);
+      const nextTarget = hit && hit !== zoneId ? hit : null;
+      if (nextTarget !== targetId) {
+        targetId = nextTarget;
+        setDragTargetId(nextTarget);
+        setHoveredZoneId(nextTarget);
+      }
+    };
+
+    const onUp = () => {
+      // active/targetId 는 지역 변수라 여기서 ref 로 확정해줘야 endPointerDrag 가 판단할 수 있다
+      const st = dragRef.current;
+      if (st) { st.targetId = targetId; st.active = active; }
+      endPointerDrag(true);
+    };
+
+    dragRef.current = { sourceId: zoneId, targetId: null, active: false, onMove, onUp };
+    document.addEventListener('mousemove', onMove);
+    document.addEventListener('mouseup', onUp);
+  }, [editingAny, endPointerDrag]);
+
+  // handleSwap 은 뒤에서 정의되므로 ref 로 최신 참조를 잡아둔다
+  const handleSwapRef = useRef(null);
+
+  /** 한 구역의 브랜드 원천값을 바꾸고 '수정됨' 표시를 남긴다 */
+  const patchBrand = useCallback((zoneId, updater) => {
+    setZones((prev) => prev.map((z) => {
+      if (z.id !== zoneId) return z;
+      const next = updater(z.currentBrand, z.area);
+      if (!next) return z;
+      return { ...z, currentBrand: next, isReplaced: true };
+    }));
+    setEditedZones((prev) => ({ ...prev, [zoneId]: true }));
+    pulse(zoneId);
+  }, [pulse]);
+
+  /** 대시보드 인라인 편집 확정 → 해당 구역만 갱신, 나머지는 파생이라 자동 동기화 */
+  const handleCommitMetric = useCallback((zoneId, key, value) => {
+    const zone = zones.find((z) => z.id === zoneId);
+    if (!zone) return;
+    const next = applyMetricEdit(zone.currentBrand, zone.area, key, value);
+    if (!next) { notify('이 값은 계산할 수 없습니다'); return; }
+    patchBrand(zoneId, () => next);
+    notify(`${zoneId} · ${(METRIC_BY_KEY[key] || {}).label || key} 수정`);
+  }, [zones, patchBrand, notify]);
+
+  /* ---------------- 대시보드 컬럼 편집 ---------------- */
+
+  const handleColumnChange = useCallback((fromKey, toKey) => {
+    setColumns((prev) => {
+      if (prev.includes(toKey) && toKey !== fromKey) {
+        // 이미 다른 컬럼에 있는 지표를 고르면 두 컬럼을 맞바꾼다
+        return prev.map((k) => (k === fromKey ? toKey : k === toKey ? fromKey : k));
+      }
+      return prev.map((k) => (k === fromKey ? toKey : k));
+    });
+  }, []);
+
+  const handleColumnRemove = useCallback((key) => {
+    setColumns((prev) => (prev.length <= 1 ? prev : prev.filter((k) => k !== key)));
+  }, []);
+
+  const handleColumnAdd = useCallback(() => {
+    setColumns((prev) => {
+      const next = METRICS.find((m) => !prev.includes(m.key));
+      return next ? [...prev, next.key] : prev;
+    });
+  }, []);
+
   /** 어떤 브랜드든 주어진 평수에 맞춰 매출을 다시 계산한다 */
   const rebaseBrand = useCallback((brand, area) => {
-    const curr = Math.round(area * brand.pyeongEfficiency * 1e4);
-    const ratio = brand.salesCurr > 0 && brand.salesPrev > 0 ? brand.salesCurr / brand.salesPrev : null;
-    const prev = ratio ? Math.round(curr / ratio) : 0;
-    return { ...brand, salesCurr: curr, salesPrev: prev };
-  }, []);
+    // 매출이 없는 브랜드는 평효율로부터 만들어 둔다
+    const curr0 = typeof brand.salesCurr === 'number' && brand.salesCurr > 0
+      ? brand.salesCurr
+      : Math.round(area * brand.pyeongEfficiency * 1e4);
+    const prev0 = typeof brand.salesPrev === 'number' ? brand.salesPrev : 0;
+
+    if (areaMode === 'absolute') {
+      // 모드 B: 절대 매출 고정 — 매출·전년매출·이익율을 그대로 옮기고 평효율만 재산출
+      return {
+        ...brand,
+        salesCurr: curr0,
+        salesPrev: prev0,
+        pyeongEfficiency: efficiencyOf(curr0, area) / 1e4,
+      };
+    }
+
+    // 모드 A: 평효율 유지 — 매출을 새 평수로 다시 계산하고 전년 매출은 신장율을 보존해 역산
+    const eff = typeof brand.pyeongEfficiency === 'number' && brand.pyeongEfficiency > 0
+      ? brand.pyeongEfficiency
+      : efficiencyOf(curr0, area) / 1e4;
+    const curr = Math.round(area * eff * 1e4);
+    const g = growthOf(curr0, prev0);
+    const prev = g != null && g > -99.9 ? Math.round(curr / (1 + g / 100)) : prev0;
+    return { ...brand, pyeongEfficiency: eff, salesCurr: curr, salesPrev: prev };
+  }, [areaMode]);
 
   /** 구역 클릭 — 후보가 선택돼 있으면 그 자리에 입점, 아니면 하이라이트 */
   const handleActivate = useCallback((zoneId) => {
@@ -1780,8 +2467,10 @@ function App() {
       return { ...z, currentBrand: brandForZone(brand, z.area), isReplaced: true };
     }));
     setSelectedZoneId(zoneId);
+    setEditedZones((prev) => ({ ...prev, [zoneId]: true }));
+    pulse(zoneId);
     notify(`${zoneId} · ${brand.name} 입점`);
-  }, [notify]);
+  }, [notify, pulse]);
 
   /** 구역 ↔ 구역 브랜드 자리 교환 (평수가 다르면 매출을 새 면적으로 재계산) */
   const handleSwap = useCallback((fromId, toId) => {
@@ -1793,24 +2482,30 @@ function App() {
       // 매출은 받는 구역의 평수로 다시 계산해야 평효율이 유지된다.
       const brandForA = rebaseBrand(b.currentBrand, a.area);
       const brandForB = rebaseBrand(a.currentBrand, b.area);
-      const baseA = ZONES_BASE.find((z) => z.id === fromId);
-      const baseB = ZONES_BASE.find((z) => z.id === toId);
+      const baseA = a.originBrand || (ZONES_BASE.find((z) => z.id === fromId) || {}).currentBrand;
+      const baseB = b.originBrand || (ZONES_BASE.find((z) => z.id === toId) || {}).currentBrand;
       return prev.map((z) => {
-        if (z.id === fromId) return { ...z, currentBrand: brandForA, isReplaced: brandForA.name !== baseA.currentBrand.name };
-        if (z.id === toId) return { ...z, currentBrand: brandForB, isReplaced: brandForB.name !== baseB.currentBrand.name };
+        if (z.id === fromId) return { ...z, currentBrand: brandForA, isReplaced: !baseA || brandForA.name !== baseA.name };
+        if (z.id === toId) return { ...z, currentBrand: brandForB, isReplaced: !baseB || brandForB.name !== baseB.name };
         return z;
       });
     });
     setDragZoneId(null);
     setSelectedZoneId(toId);
+    setEditedZones((prev) => ({ ...prev, [fromId]: true, [toId]: true }));
+    pulse(toId);
     notify(`${fromId} ⇄ ${toId} 자리 교환`);
-  }, [rebaseBrand, notify]);
+  }, [rebaseBrand, notify, pulse]);
+
+  // 포인터 드래그 컨트롤러가 최신 handleSwap 을 참조하도록
+  handleSwapRef.current = handleSwap;
 
   const handleRevert = useCallback((zoneId) => {
     setZones((prev) => prev.map((z) => {
       if (z.id !== zoneId) return z;
-      const base = ZONES_BASE.find((b) => b.id === zoneId);
-      return { ...z, currentBrand: { ...base.currentBrand }, isReplaced: false };
+      const origin = z.originBrand || (ZONES_BASE.find((b) => b.id === zoneId) || {}).currentBrand;
+      if (!origin) return z;
+      return { ...z, currentBrand: { ...origin }, isReplaced: false };
     }));
     notify(`${zoneId} 원래 브랜드로 복원`);
   }, [notify]);
@@ -1854,7 +2549,9 @@ function App() {
       const text = await file.text();
       const res = P.parseDxf(text);
       if (!res.polys.length) throw new Error('DXF에서 그릴 수 있는 선을 찾지 못했습니다 (블록/레이어 확인)');
-      return { patches: res.polys, regions: [], stats: res.stats, kind: 'DXF', vector: true };
+      const dxfRegions = P.regionsFromPolys(res.polys);
+      res.stats.regions = dxfRegions.length;
+      return { patches: res.polys, regions: dxfRegions, stats: res.stats, kind: 'DXF', vector: true };
     }
 
     // --- SVG ---
@@ -1863,7 +2560,7 @@ function App() {
       const text = await file.text();
       const res = P.svgToPolys(text, VB.w, VB.h, VB.pad);
       if (!res.polys.length) throw new Error('SVG에서 그릴 수 있는 도형을 찾지 못했습니다');
-      return { patches: res.polys, regions: [], stats: res.stats, kind: 'SVG', vector: true, svgText: text };
+      return { patches: res.polys, regions: res.regions || [], rect: res.rect, stats: res.stats, kind: 'SVG', vector: true, svgText: text };
     }
 
     // --- PDF ---
@@ -1934,7 +2631,25 @@ function App() {
       setPlan({ url, name: file.name, kind: out.kind });
       setShowZones(true);
       setShowTrace(out.kind !== 'SVG');
-      notify(`${file.name} · 선 ${out.patches.length}개 해석 완료`);
+
+      // 도면에서 읽은 구획으로 구역을 새로 세운다 (기존 목업을 걷어낸다)
+      const derived = zonesFromRegions(out.regions, ZONES_BASE.map((z) => z.currentBrand), PLAN_TOTAL_PYEONG);
+      if (derived && derived.length >= 2) {
+        setZones(derived);
+        setBaseline(metricsOf(derived));
+        setSelectedZoneId(null);
+        setEditedZones({});
+        notify(`${file.name} · 구획 ${derived.length}개 인식`);
+      } else {
+        // 구획을 못 찾았는데 목업 구역을 남기면 엉뚱한 도면 위에 옛 구역이 겹친다.
+        // 구역을 비우고 감지된 닫힌 영역을 보여줘서 무엇이 잡혔는지 확인하게 한다.
+        setZones([]);
+        setBaseline({ rev: 0, profit: 0, pyeong: 0, eff: 0, profitRate: 0 });
+        setSelectedZoneId(null);
+        setEditedZones({});
+        setShowRegions(true);
+        notify(`${file.name} · 닫힌 구획을 찾지 못했습니다 (영역 표시를 확인)`);
+      }
     } catch (err) {
       setParseError(String(err && err.message ? err.message : err));
       notify('도면 해석 실패 — 형식을 확인하세요');
@@ -1955,24 +2670,34 @@ function App() {
     setAnalysis(null);
     setParseError(null);
     setShowZones(true);
+    setZones(cloneBase());
+    setBaseline(metricsOf(ZONES_BASE));
+    setSelectedZoneId(null);
+    setEditedZones({});
     notify('기본 도면으로 되돌렸습니다');
   }, [notify]);
 
   const handleReset = useCallback(() => {
     setZones(cloneBase());
+    setBaseline(metricsOf(ZONES_BASE));
     setSelectedCandidate(null);
     setHoveredZoneId(null);
+    setEditedZones({});
+    setPulseZone(null);
     notify('초기 도면으로 복원했습니다');
   }, [notify]);
 
-  const rows = useMemo(() => storeRows(zones), [zones]);
+  const rows = useMemo(
+    () => storeRows(zones).map((r) => ({ ...r, edited: Boolean(editedZones[r.zoneId]) })),
+    [zones, editedZones],
+  );
 
   // 드래그 중일 때만 드롭 대상 구역을 표시한다 (단순 호버와 분리)
   const isDragging = Boolean(dragZoneId) || candidateDrag;
   const dropTargetId = isDragging ? hoveredZoneId : null;
-  const deltaRev = currentMetrics.rev - initialMetrics.rev;
-  const deltaEff = currentMetrics.eff - initialMetrics.eff;
-  const deltaProfit = currentMetrics.profit - initialMetrics.profit;
+  const deltaRev = currentMetrics.rev - baseline.rev;
+  const deltaEff = currentMetrics.eff - baseline.eff;
+  const deltaProfit = currentMetrics.profit - baseline.profit;
 
   const visibleRows = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -2005,7 +2730,7 @@ function App() {
             delta={deltaRev}
             deltaUnit="억"
             digits={1}
-            footnote={`기준 ${initialMetrics.rev.toFixed(1)}억`}
+            footnote={`기준 ${baseline.rev.toFixed(1)}억`}
           />
           <KpiCapsule
             label="평균 평효율"
@@ -2014,7 +2739,7 @@ function App() {
             delta={deltaEff}
             deltaUnit="만"
             digits={0}
-            footnote={`기준 ${man(initialMetrics.eff)}만`}
+            footnote={`기준 ${man(baseline.eff)}만`}
           />
           <KpiCapsule
             label="총 이익액 (평균 이익율)"
@@ -2117,6 +2842,32 @@ function App() {
                   </button>
                 ) : null}
 
+                <div className="flex items-center overflow-hidden rounded-lg border border-slate-300 bg-white text-[10.5px] font-bold">
+                  <span className="px-1.5 py-1 text-slate-400">면적 연동</span>
+                  <button
+                    type="button"
+                    onClick={() => setAreaMode('efficiency')}
+                    aria-pressed={areaMode === 'efficiency'}
+                    title="이동 후에도 평효율을 유지하고 매출을 새 평수로 다시 계산합니다"
+                    className={`px-1.5 py-1 transition ${
+                      areaMode === 'efficiency' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    평효율 유지
+                  </button>
+                  <button
+                    type="button"
+                    onClick={() => setAreaMode('absolute')}
+                    aria-pressed={areaMode === 'absolute'}
+                    title="매출은 그대로 두고 평효율만 새 평수로 다시 계산합니다"
+                    className={`px-1.5 py-1 transition ${
+                      areaMode === 'absolute' ? 'bg-slate-900 text-white' : 'text-slate-500 hover:bg-slate-50'
+                    }`}
+                  >
+                    매출 고정
+                  </button>
+                </div>
+
                 {plan ? (
                   <button
                     type="button"
@@ -2160,6 +2911,9 @@ function App() {
                 dropZoneId={dropTargetId}
                 dragZoneId={dragZoneId}
                 candidateDrag={candidateDrag}
+                pulseZone={pulseZone}
+                pointerDragEnabled={!editingAny}
+                onPointerDragStart={handlePointerDragStart}
                 onHover={setHoveredZoneId}
                 onLeave={() => setHoveredZoneId(null)}
                 onActivate={handleActivate}
@@ -2225,7 +2979,21 @@ function App() {
           </div>
 
           <div className="min-h-0 flex-[3]">
-            <RankingDashboard rows={rows} selectedZoneId={selectedZoneId} onSelect={setSelectedZoneId} />
+            <RankingDashboard
+              rows={rows}
+              columns={columns}
+              limit={rankLimit}
+              dir={rankDir}
+              selectedZoneId={selectedZoneId}
+              onSelect={setSelectedZoneId}
+              onCommitValue={handleCommitMetric}
+              onHeaderChange={handleColumnChange}
+              onHeaderRemove={handleColumnRemove}
+              onAddColumn={handleColumnAdd}
+              onLimit={setRankLimit}
+              onToggleDir={() => setRankDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
+              pulseZone={pulseZone}
+            />
           </div>
         </div>
 
