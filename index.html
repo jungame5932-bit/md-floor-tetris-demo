@@ -1159,6 +1159,13 @@ const cloneBase = () => ZONES_BASE.map((z) => ({
   originBrand: { ...z.currentBrand },
 }));
 
+/** 업로드 도면에서 만든 구역을 되돌릴 수 있도록 깊은 복사한다 */
+const cloneZoneList = (list) => (list || []).map((z) => ({
+  ...z,
+  currentBrand: { ...z.currentBrand },
+  originBrand: { ...(z.originBrand || z.currentBrand) },
+}));
+
 /** 후보 브랜드를 특정 평수 구역에 놓을 때의 브랜드 객체 */
 function brandForZone(cand, area) {
   const curr = Math.round(area * cand.pyeongEfficiency * 1e4);
@@ -2322,6 +2329,8 @@ function App() {
   const planUrlRef = useRef(null);
 
   const [baseline, setBaseline] = useState(() => metricsOf(ZONES_BASE));
+  // 업로드 도면에서 만든 구역 원본 — 리셋은 여기로 되돌아가야 한다
+  const [planZones, setPlanZones] = useState(null);
   const currentMetrics = useMemo(() => metricsOf(zones), [zones]);
 
   const usedCounts = useMemo(() => {
@@ -2696,7 +2705,8 @@ function App() {
       // 도면에서 읽은 구획으로 구역을 새로 세운다 (기존 목업을 걷어낸다)
       const derived = zonesFromRegions(out.regions, ZONES_BASE.map((z) => z.currentBrand), PLAN_TOTAL_PYEONG);
       if (derived && derived.length >= 2) {
-        setZones(derived);
+        setPlanZones(cloneZoneList(derived));
+        setZones(cloneZoneList(derived));
         setBaseline(metricsOf(derived));
         setSelectedZoneId(null);
         setEditedZones({});
@@ -2705,6 +2715,7 @@ function App() {
         // 구획을 못 찾았는데 목업 구역을 남기면 엉뚱한 도면 위에 옛 구역이 겹친다.
         // 구역을 비우고 감지된 닫힌 영역을 보여줘서 무엇이 잡혔는지 확인하게 한다.
         setZones([]);
+        setPlanZones([]);
         setBaseline({ rev: 0, profit: 0, pyeong: 0, eff: 0, profitRate: 0 });
         setSelectedZoneId(null);
         setEditedZones({});
@@ -2732,6 +2743,7 @@ function App() {
     setParseError(null);
     setShowZones(true);
     setZones(cloneBase());
+    setPlanZones(null);
     setBaseline(metricsOf(ZONES_BASE));
     setSelectedZoneId(null);
     setEditedZones({});
@@ -2739,6 +2751,29 @@ function App() {
   }, [notify]);
 
   const handleReset = useCallback(() => {
+    // 업로드한 도면이 떠 있으면 그 도면의 구획으로 되돌린다.
+    // 내장 목업으로 되돌리면 새 도면 위에 옛 폴리곤이 다시 얹힌다.
+    if (planZones && planZones.length) {
+      const restored = cloneZoneList(planZones);
+      setZones(restored);
+      setBaseline(metricsOf(restored));
+      setSelectedCandidate(null);
+      setHoveredZoneId(null);
+      setEditedZones({});
+      setPulseZone(null);
+      notify(`도면 구획 ${restored.length}개로 복원했습니다`);
+      return;
+    }
+    if (planZones) {
+      setZones([]);
+      setBaseline({ rev: 0, profit: 0, pyeong: 0, eff: 0, profitRate: 0 });
+      setSelectedCandidate(null);
+      setHoveredZoneId(null);
+      setEditedZones({});
+      setPulseZone(null);
+      notify('이 도면에서 복원할 구획이 없습니다');
+      return;
+    }
     setZones(cloneBase());
     setBaseline(metricsOf(ZONES_BASE));
     setSelectedCandidate(null);
@@ -2746,7 +2781,7 @@ function App() {
     setEditedZones({});
     setPulseZone(null);
     notify('초기 도면으로 복원했습니다');
-  }, [notify]);
+  }, [planZones, notify]);
 
   const rows = useMemo(
     () => storeRows(zones).map((r) => ({ ...r, edited: Boolean(editedZones[r.zoneId]) })),
@@ -2816,10 +2851,11 @@ function App() {
         <button
           type="button"
           onClick={handleReset}
+          title={planZones ? '업로드한 도면에서 읽은 구획으로 되돌립니다' : '내장 기본 도면으로 되돌립니다'}
           className="flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 shadow-sm transition hover:bg-slate-50 active:scale-95"
         >
           <Icon name="RotateCcw" size={13} />
-          도면 리셋
+          {planZones ? '구획 복원' : '도면 리셋'}
         </button>
       </header>
 
