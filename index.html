@@ -1,0 +1,1803 @@
+<!doctype html>
+<html lang="ko">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=1440" />
+<meta name="color-scheme" content="light" />
+<title>LOTTE MD Studio · 잠실점 B1 비정형 CAD MD 시뮬레이터</title>
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='8' fill='%23E60012'/%3E%3Cpath d='M9 11h14M9 16h9M9 21h14' stroke='white' stroke-width='2.6' stroke-linecap='round'/%3E%3C/svg%3E" />
+<link rel="stylesheet" as="style" crossorigin href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard@v1.3.9/dist/web/static/pretendard.min.css" />
+<script src="https://cdn.tailwindcss.com"></script>
+<script>
+  tailwind.config = {
+    theme: {
+      extend: {
+        fontFamily: {
+          sans: ['Pretendard', '-apple-system', 'BlinkMacSystemFont', 'system-ui', 'sans-serif'],
+        },
+        colors: {
+          lotte: { red: '#E60012', dark: '#B3000E' },
+        },
+        boxShadow: {
+          card: '0 2px 10px -3px rgba(6,81,237,0.05)',
+          lift: '0 12px 28px -12px rgba(15,23,42,0.18)',
+        },
+      },
+    },
+  };
+</script>
+<script src="https://unpkg.com/react@18.3.1/umd/react.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/react-dom@18.3.1/umd/react-dom.production.min.js" crossorigin></script>
+<script src="https://unpkg.com/lucide@0.462.0/dist/umd/lucide.js" crossorigin></script>
+<script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" crossorigin></script>
+<script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
+<style>
+  html, body { height: 100%; }
+  body {
+    overflow: hidden;
+    background: #F8FAFC;
+    font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+    -webkit-font-smoothing: antialiased;
+    text-rendering: optimizeLegibility;
+    user-select: none;
+  }
+  .tabular { font-variant-numeric: tabular-nums; }
+  .cad-canvas-bg {
+    background-color: #FAFAFC;
+    background-image: radial-gradient(#CBD5E1 1.2px, transparent 1.2px);
+    background-size: 24px 24px;
+  }
+  .custom-scrollbar::-webkit-scrollbar { width: 5px; }
+  .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
+  .custom-scrollbar::-webkit-scrollbar-track { background: transparent; }
+  .zone-shape { transition: fill .16s ease, stroke .16s ease, stroke-width .16s ease; }
+  .cand-card { transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease, background .15s ease; }
+  .cand-card:hover { transform: translateY(-1px); }
+  *:focus-visible { outline: 2px solid #0F172A; outline-offset: 2px; }
+</style>
+</head>
+<body class="flex h-screen flex-col bg-[#F8FAFC] text-slate-800 antialiased">
+<div id="root" class="flex h-full flex-col"></div>
+
+<script>
+/* ============================================================
+ * PlanParser — 도면 파일(DXF / SVG / PDF / PNG / JPG)을 폴리라인으로 해석
+ * 외부 CAD 엔진 없이 브라우저 안에서만 동작한다.
+ * ============================================================ */
+window.PlanParser = (function () {
+  'use strict';
+
+  var num = function (v) { var n = Number(String(v).trim()); return isFinite(n) ? n : 0; };
+  var clamp = function (v, a, b) { return v < a ? a : v > b ? b : v; };
+
+  /* ---------------- 공통 유틸 ---------------- */
+
+  function bboxOf(polys) {
+    var minX = Infinity, minY = Infinity, maxX = -Infinity, maxY = -Infinity;
+    for (var i = 0; i < polys.length; i++) {
+      var pts = polys[i].pts;
+      for (var j = 0; j < pts.length; j++) {
+        var x = pts[j][0], y = pts[j][1];
+        if (x < minX) minX = x; if (x > maxX) maxX = x;
+        if (y < minY) minY = y; if (y > maxY) maxY = y;
+      }
+    }
+    if (!isFinite(minX)) return { x: 0, y: 0, w: 1, h: 1 };
+    return { x: minX, y: minY, w: Math.max(maxX - minX, 1e-6), h: Math.max(maxY - minY, 1e-6) };
+  }
+
+  /** 폴리라인 집합을 target 박스에 맞춰 정규화. flipY 는 DXF(수학좌표) 대응. */
+  function fit(polys, tw, th, pad, flipY) {
+    var b = bboxOf(polys);
+    var s = Math.min((tw - pad * 2) / b.w, (th - pad * 2) / b.h);
+    var ox = (tw - b.w * s) / 2, oy = (th - b.h * s) / 2;
+    var out = polys.map(function (p) {
+      return {
+        pts: p.pts.map(function (pt) {
+          return [
+            ox + (pt[0] - b.x) * s,
+            oy + (flipY ? (b.y + b.h - pt[1]) : (pt[1] - b.y)) * s,
+          ];
+        }),
+        closed: p.closed,
+        layer: p.layer,
+        kind: p.kind,
+      };
+    });
+    return { polys: out, scale: s, bbox: b };
+  }
+
+  function toPathData(polys, digits) {
+    var d = digits == null ? 2 : digits;
+    var r = function (v) { return Math.round(v * Math.pow(10, d)) / Math.pow(10, d); };
+    var parts = [];
+    for (var i = 0; i < polys.length; i++) {
+      var pts = polys[i].pts;
+      if (!pts || pts.length < 2) continue;
+      var s = 'M' + r(pts[0][0]) + ' ' + r(pts[0][1]);
+      for (var j = 1; j < pts.length; j++) s += 'L' + r(pts[j][0]) + ' ' + r(pts[j][1]);
+      if (polys[i].closed) s += 'Z';
+      parts.push(s);
+    }
+    return parts.join('');
+  }
+
+  /* ---------------- RDP 단순화 ---------------- */
+
+  function rdp(points, eps) {
+    if (points.length < 3) return points;
+    var keep = new Uint8Array(points.length);
+    keep[0] = 1; keep[points.length - 1] = 1;
+    var stack = [[0, points.length - 1]];
+    while (stack.length) {
+      var seg = stack.pop(), a = seg[0], b = seg[1];
+      var ax = points[a][0], ay = points[a][1];
+      var bx = points[b][0], by = points[b][1];
+      var dx = bx - ax, dy = by - ay;
+      var len = Math.hypot(dx, dy) || 1;
+      var maxD = -1, idx = -1;
+      for (var i = a + 1; i < b; i++) {
+        var px = points[i][0], py = points[i][1];
+        var dist = Math.abs((px - ax) * dy - (py - ay) * dx) / len;
+        if (dist > maxD) { maxD = dist; idx = i; }
+      }
+      if (maxD > eps && idx > 0) {
+        keep[idx] = 1;
+        stack.push([a, idx], [idx, b]);
+      }
+    }
+    var out = [];
+    for (var k = 0; k < points.length; k++) if (keep[k]) out.push(points[k]);
+    return out;
+  }
+
+  /* ============================================================
+   * 1. DXF (ASCII)
+   * ============================================================ */
+
+  function tokenize(text) {
+    var lines = text.split(/\r\n|\r|\n/);
+    var pairs = [];
+    for (var i = 0; i < lines.length - 1;) {
+      var t = lines[i].trim();
+      if (!/^-?\d+$/.test(t)) { i += 1; continue; }
+      pairs.push([Number(t), lines[i + 1]]);
+      i += 2;
+    }
+    return pairs;
+  }
+
+  function parseDxf(text) {
+    var pairs = tokenize(text);
+    var header = {};
+    var blocks = {};
+    var entities = [];
+    var section = null, cur = null, curBlock = null, headerVar = null;
+    var layers = {};
+
+    function pushEntity() {
+      if (!cur) return;
+      if (section === 'BLOCKS' && curBlock) curBlock.entities.push(cur);
+      else if (section === 'ENTITIES') entities.push(cur);
+      cur = null;
+    }
+
+    for (var i = 0; i < pairs.length; i++) {
+      var code = pairs[i][0], val = pairs[i][1];
+      if (code === 0) {
+        pushEntity();
+        var t = String(val).trim().toUpperCase();
+        if (t === 'SECTION') {
+          var nx = pairs[i + 1];
+          section = nx && nx[0] === 2 ? String(nx[1]).trim().toUpperCase() : null;
+          i += 1;
+          continue;
+        }
+        if (t === 'ENDSEC') { section = null; curBlock = null; headerVar = null; continue; }
+        if (t === 'BLOCK') { curBlock = { name: '', base: [0, 0], entities: [] }; continue; }
+        if (t === 'ENDBLK') { if (curBlock) blocks[curBlock.name] = curBlock; curBlock = null; continue; }
+        cur = { type: t, data: [] };
+        continue;
+      }
+      if (section === 'HEADER' && !cur) {
+        if (code === 9) headerVar = String(val).trim();
+        else if (headerVar) header[headerVar] = String(val).trim();
+        continue;
+      }
+      if (cur) {
+        cur.data.push([code, val]);
+        if (code === 8) layers[String(val).trim()] = (layers[String(val).trim()] || 0) + 1;
+      } else if (curBlock) {
+        if (code === 2) curBlock.name = String(val).trim();
+        else if (code === 10) curBlock.base[0] = num(val);
+        else if (code === 20) curBlock.base[1] = num(val);
+      }
+    }
+    pushEntity();
+
+    var last = function (e, c) {
+      for (var k = e.data.length - 1; k >= 0; k--) if (e.data[k][0] === c) return e.data[k][1];
+      return undefined;
+    };
+    var first = function (e, c) {
+      for (var k = 0; k < e.data.length; k++) if (e.data[k][0] === c) return e.data[k][1];
+      return undefined;
+    };
+    var fnum = function (e, c, dflt) { var v = first(e, c); return v === undefined ? (dflt || 0) : num(v); };
+
+    function arcPoints(cx, cy, r, a0, a1, steps) {
+      var out = [];
+      var t0 = (a0 * Math.PI) / 180, t1 = (a1 * Math.PI) / 180;
+      var sweep = t1 - t0;
+      if (sweep <= 0) sweep += Math.PI * 2;
+      var n = steps || Math.max(8, Math.ceil((sweep / (Math.PI * 2)) * 64));
+      for (var s = 0; s <= n; s++) {
+        var a = t0 + (sweep * s) / n;
+        out.push([cx + r * Math.cos(a), cy + r * Math.sin(a)]);
+      }
+      return out;
+    }
+
+    /** bulge(호) 구간을 3점 원으로 풀어 샘플링 */
+    function bulgeArc(p1, p2, bulge) {
+      if (Math.abs(bulge) < 1e-9) return [p1, p2];
+      var dx = p2[0] - p1[0], dy = p2[1] - p1[1];
+      var chord = Math.hypot(dx, dy);
+      if (chord < 1e-9) return [p1, p2];
+      var sag = (bulge * chord) / 2;
+      var nx = -dy / chord, ny = dx / chord;
+      var apex = [(p1[0] + p2[0]) / 2 + nx * sag, (p1[1] + p2[1]) / 2 + ny * sag];
+      // 세 점의 외접원
+      var ax = p1[0], ay = p1[1], bx = apex[0], by = apex[1], cx2 = p2[0], cy2 = p2[1];
+      var d = 2 * (ax * (by - cy2) + bx * (cy2 - ay) + cx2 * (ay - by));
+      if (Math.abs(d) < 1e-9) return [p1, p2];
+      var ux = ((ax * ax + ay * ay) * (by - cy2) + (bx * bx + by * by) * (cy2 - ay) + (cx2 * cx2 + cy2 * cy2) * (ay - by)) / d;
+      var uy = ((ax * ax + ay * ay) * (cx2 - bx) + (bx * bx + by * by) * (ax - cx2) + (cx2 * cx2 + cy2 * cy2) * (bx - ax)) / d;
+      var r = Math.hypot(ax - ux, ay - uy);
+      var a1 = Math.atan2(ay - uy, ax - ux);
+      var a2 = Math.atan2(cy2 - uy, cx2 - ux);
+      var am = Math.atan2(by - uy, bx - ux);
+      var norm = function (v) { while (v < 0) v += Math.PI * 2; while (v >= Math.PI * 2) v -= Math.PI * 2; return v; };
+      var s1 = a1, dir1 = norm(a2 - a1), dir2 = norm(a1 - a2);
+      var mid1 = norm(am - s1);
+      var useCcw = mid1 < dir1;
+      var steps = Math.max(6, Math.ceil(((useCcw ? dir1 : dir2) / (Math.PI * 2)) * 48));
+      var out = [];
+      for (var s = 0; s <= steps; s++) {
+        var t = s / steps;
+        var ang = useCcw ? s1 + dir1 * t : s1 - dir2 * t;
+        out.push([ux + r * Math.cos(ang), uy + r * Math.sin(ang)]);
+      }
+      return out;
+    }
+
+    var out = [];
+    var counts = {};
+
+    function addPoly(pts, layer, closed, kind) {
+      if (!pts || pts.length < 2) return;
+      out.push({ pts: pts, layer: layer || '0', closed: !!closed, kind: kind });
+      counts[kind] = (counts[kind] || 0) + 1;
+    }
+
+    function emit(e, layer, depth) {
+      var t = e.type;
+      if (t === 'LINE') {
+        addPoly([[fnum(e, 10), fnum(e, 20)], [fnum(e, 11), fnum(e, 21)]], layer, false, 'LINE');
+      } else if (t === 'LWPOLYLINE') {
+        var xs = [];
+        var curX = null;
+        for (var k = 0; k < e.data.length; k++) {
+          var c = e.data[k][0], v = e.data[k][1];
+          if (c === 10) curX = num(v);
+          else if (c === 20) xs.push([curX, num(v), 0]);
+          else if (c === 42) { if (xs.length) xs[xs.length - 1][2] = num(v); }
+        }
+        var closed = (fnum(e, 70) & 1) === 1;
+        var pts = [];
+        for (var q = 0; q < xs.length; q++) {
+          var nx2 = xs[(q + 1) % xs.length];
+          var isLast = q === xs.length - 1;
+          if (isLast && !closed) { pts.push([xs[q][0], xs[q][1]]); continue; }
+          var seg = bulgeArc([xs[q][0], xs[q][1]], [nx2[0], nx2[1]], xs[q][2]);
+          for (var z = 0; z < seg.length - (isLast ? 1 : 0); z++) pts.push(seg[z]);
+        }
+        addPoly(pts, layer, closed, 'LWPOLYLINE');
+      } else if (t === 'ARC') {
+        addPoly(arcPoints(fnum(e, 10), fnum(e, 20), fnum(e, 40), fnum(e, 50), fnum(e, 51)), layer, false, 'ARC');
+      } else if (t === 'CIRCLE') {
+        var ccx = fnum(e, 10), ccy = fnum(e, 20), cr = fnum(e, 40);
+        addPoly(arcPoints(ccx, ccy, cr, 0, 359.999), layer, true, 'CIRCLE');
+      } else if (t === 'ELLIPSE') {
+        var ex = fnum(e, 10), ey = fnum(e, 20);
+        var mx = fnum(e, 11), my = fnum(e, 21);
+        var ratio = fnum(e, 40, 1) || 1;
+        var p0 = fnum(e, 41, 0), p1 = fnum(e, 42, Math.PI * 2);
+        var major = Math.hypot(mx, my) || 1;
+        var rot = Math.atan2(my, mx);
+        var pts2 = [];
+        var n2 = 64;
+        for (var s2 = 0; s2 <= n2; s2++) {
+          var par = p0 + ((p1 - p0) * s2) / n2;
+          var lx = major * Math.cos(par), ly = major * ratio * Math.sin(par);
+          pts2.push([ex + lx * Math.cos(rot) - ly * Math.sin(rot), ey + lx * Math.sin(rot) + ly * Math.cos(rot)]);
+        }
+        addPoly(pts2, layer, Math.abs(p1 - p0 - Math.PI * 2) < 1e-3, 'ELLIPSE');
+      } else if (t === 'SPLINE') {
+        var sp = [];
+        for (var k2 = 0; k2 < e.data.length; k2++) {
+          if (e.data[k2][0] === 10) {
+            var yv = 0;
+            for (var k3 = k2; k3 < e.data.length && k3 < k2 + 3; k3++) if (e.data[k3][0] === 20) { yv = num(e.data[k3][1]); break; }
+            sp.push([num(e.data[k2][1]), yv]);
+          }
+        }
+        addPoly(sp, layer, (fnum(e, 70) & 1) === 1, 'SPLINE');
+      } else if (t === 'SOLID' || t === '3DFACE' || t === 'TRACE') {
+        var quad = [[fnum(e, 10), fnum(e, 20)], [fnum(e, 11), fnum(e, 21)], [fnum(e, 13, fnum(e, 12)), fnum(e, 23, fnum(e, 22))], [fnum(e, 12), fnum(e, 22)]];
+        addPoly(quad, layer, true, t);
+      } else if (t === 'INSERT') {
+        if (depth > 3) return;
+        var name = String(first(e, 2) || '').trim();
+        var blk = blocks[name];
+        if (!blk) return;
+        var ix = fnum(e, 10), iy = fnum(e, 20);
+        var sx = fnum(e, 41, 1) || 1, sy = fnum(e, 42, 1) || 1;
+        var rot2 = (fnum(e, 50) * Math.PI) / 180;
+        var cols = Math.max(1, fnum(e, 70, 1)), rows = Math.max(1, fnum(e, 71, 1));
+        var dc = fnum(e, 44), dr = fnum(e, 45);
+        var cosr = Math.cos(rot2), sinr = Math.sin(rot2);
+        for (var rr = 0; rr < rows; rr++) {
+          for (var ccn = 0; ccn < cols; ccn++) {
+            var ox = ccn * dc, oy = rr * dr;
+            (function (oxx, oyy) {
+              var sub = [];
+              var xf = function (p) {
+                var lx2 = (p[0] - blk.base[0] + oxx) * sx;
+                var ly2 = (p[1] - blk.base[1] + oyy) * sy;
+                return [ix + lx2 * cosr - ly2 * sinr, iy + lx2 * sinr + ly2 * cosr];
+              };
+              for (var bi = 0; bi < blk.entities.length; bi++) {
+                var before = out.length;
+                emit(blk.entities[bi], blk.entities[bi].layer || layer, depth + 1);
+                for (var oi = before; oi < out.length; oi++) {
+                  out[oi].pts = out[oi].pts.map(xf);
+                }
+              }
+            })(ox, oy);
+          }
+        }
+      }
+    }
+
+    for (var e = 0; e < entities.length; e++) {
+      var ent = entities[e];
+      var lay = '0';
+      for (var kk = 0; kk < ent.data.length; kk++) if (ent.data[kk][0] === 8) { lay = String(ent.data[kk][1]).trim(); break; }
+      emit(ent, lay, 0);
+    }
+
+    var fitted = fit(out, 1000, 680, 26, true);
+    return {
+      polys: fitted.polys,
+      stats: {
+        format: 'DXF',
+        entities: entities.length,
+        lines: out.length,
+        layers: Object.keys(layers),
+        units: header['$INSUNITS'] || '0',
+        extents: { w: Math.round(fitted.bbox.w), h: Math.round(fitted.bbox.h) },
+        byType: counts,
+      },
+    };
+  }
+
+  /* ============================================================
+   * 2. SVG → 폴리라인 (브라우저 기하 API 사용)
+   * ============================================================ */
+
+  function svgToPolys(svgText, tw, th, pad) {
+    var host = document.createElement('div');
+    host.setAttribute('style', 'position:fixed;left:-99999px;top:0;width:1600px;height:1200px;opacity:0;pointer-events:none;');
+    host.innerHTML = svgText;
+    document.body.appendChild(host);
+    var svg = host.querySelector('svg');
+    if (!svg) { document.body.removeChild(host); throw new Error('SVG 루트 엘리먼트를 찾지 못했습니다'); }
+
+    if (!svg.getAttribute('width')) svg.setAttribute('width', '1600');
+    if (!svg.getAttribute('height')) svg.setAttribute('height', '1200');
+
+    var root = svg.getScreenCTM();
+    if (!root) { document.body.removeChild(host); throw new Error('SVG 좌표계를 읽지 못했습니다'); }
+    var inv = root.inverse();
+
+    var tags = ['path', 'line', 'polyline', 'polygon', 'rect', 'circle', 'ellipse'];
+    var els = svg.querySelectorAll(tags.join(','));
+    var polys = [];
+    var counts = {};
+    var budget = 60000;
+
+    for (var i = 0; i < els.length && budget > 0; i++) {
+      var el = els[i];
+      var tag = el.tagName.toLowerCase();
+      var len = 0;
+      try { len = el.getTotalLength(); } catch (err) { continue; }
+      if (!isFinite(len) || len <= 0) continue;
+      var n = clamp(Math.ceil(len / 4), 6, 700);
+      n = Math.min(n, budget);
+      var ctm = el.getScreenCTM();
+      if (!ctm) continue;
+      var m = inv.multiply(ctm);
+      var pts = [];
+      for (var s = 0; s <= n; s++) {
+        var p = el.getPointAtLength((len * s) / n);
+        var q = new DOMPoint(p.x, p.y).matrixTransform(m);
+        pts.push([q.x, q.y]);
+      }
+      budget -= n;
+      polys.push({ pts: pts, closed: tag === 'polygon' || tag === 'rect' || tag === 'circle' || tag === 'ellipse', layer: 'svg' });
+      counts[tag] = (counts[tag] || 0) + 1;
+    }
+
+    document.body.removeChild(host);
+
+    var fittedSvg = fit(polys, tw, th, pad, false);
+    return {
+      polys: fittedSvg.polys,
+      stats: {
+        format: 'SVG',
+        entities: els.length,
+        lines: polys.length,
+        layers: ['svg'],
+        units: 'px',
+        extents: { w: Math.round(fittedSvg.bbox.w), h: Math.round(fittedSvg.bbox.h) },
+        byType: counts,
+      },
+    };
+  }
+
+  /* ============================================================
+   * 3. 래스터 라인 추적 (PNG / JPG / PDF 렌더)
+   * ============================================================ */
+
+  function otsu(gray) {
+    var hist = new Uint32Array(256);
+    for (var i = 0; i < gray.length; i++) hist[gray[i]]++;
+    var total = gray.length, sum = 0;
+    for (var t = 0; t < 256; t++) sum += t * hist[t];
+    var sumB = 0, wB = 0, best = -1, thr = 140;
+    for (var k = 0; k < 256; k++) {
+      wB += hist[k];
+      if (!wB) continue;
+      var wF = total - wB;
+      if (!wF) break;
+      sumB += k * hist[k];
+      var mB = sumB / wB, mF = (sum - sumB) / wF;
+      var between = wB * wF * (mB - mF) * (mB - mF);
+      if (between > best) { best = between; thr = k; }
+    }
+    return thr;
+  }
+
+  /** Zhang-Suen 세선화 */
+  function thin(src, W, H) {
+    var img = new Uint8Array(src);
+    var changed = true, iter = 0;
+    var g = function (x, y) { return x < 0 || y < 0 || x >= W || y >= H ? 0 : img[y * W + x]; };
+    while (changed && iter < 18) {
+      changed = false;
+      for (var step = 0; step < 2; step++) {
+        var del = [];
+        for (var y = 1; y < H - 1; y++) {
+          for (var x = 1; x < W - 1; x++) {
+            if (!img[y * W + x]) continue;
+            var p2 = g(x, y - 1), p3 = g(x + 1, y - 1), p4 = g(x + 1, y), p5 = g(x + 1, y + 1);
+            var p6 = g(x, y + 1), p7 = g(x - 1, y + 1), p8 = g(x - 1, y), p9 = g(x - 1, y - 1);
+            var B = p2 + p3 + p4 + p5 + p6 + p7 + p8 + p9;
+            if (B < 2 || B > 6) continue;
+            var seq = [p2, p3, p4, p5, p6, p7, p8, p9, p2];
+            var A = 0;
+            for (var s = 0; s < 8; s++) if (!seq[s] && seq[s + 1]) A++;
+            if (A !== 1) continue;
+            if (step === 0) { if (p2 && p4 && p6) continue; if (p4 && p6 && p8) continue; }
+            else { if (p2 && p4 && p8) continue; if (p2 && p6 && p8) continue; }
+            del.push(y * W + x);
+          }
+        }
+        if (del.length) { changed = true; for (var d = 0; d < del.length; d++) img[del[d]] = 0; }
+      }
+      iter++;
+    }
+    return img;
+  }
+
+  /** 세선 이미지를 폴리라인으로 추적 */
+  function traceSkeleton(ink, W, H) {
+    var deg = new Uint8Array(W * H);
+    var idxs = [];
+    for (var y = 1; y < H - 1; y++) {
+      for (var x = 1; x < W - 1; x++) {
+        var i = y * W + x;
+        if (!ink[i]) continue;
+        idxs.push(i);
+        var c = 0;
+        for (var dy = -1; dy <= 1; dy++) for (var dx = -1; dx <= 1; dx++) { if (!dx && !dy) continue; if (ink[(y + dy) * W + x + dx]) c++; }
+        deg[i] = c;
+      }
+    }
+    var visited = new Set();
+    var key = function (a, b) { return a < b ? a * 8388608 + b : b * 8388608 + a; };
+    var lines = [];
+
+    function stepFrom(cur, prev) {
+      var x = cur % W, y = (cur - x) / W;
+      for (var dy = -1; dy <= 1; dy++) {
+        for (var dx = -1; dx <= 1; dx++) {
+          if (!dx && !dy) continue;
+          var nx = x + dx, ny = y + dy;
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          var n = ny * W + nx;
+          if (!ink[n] || n === prev) continue;
+          if (visited.has(key(cur, n))) continue;
+          return n;
+        }
+      }
+      return -1;
+    }
+
+    function walk(start) {
+      var pts = [[start % W, Math.floor(start / W)]];
+      var prev = -1, cur = start, guard = 0;
+      while (guard++ < 20000) {
+        var next = stepFrom(cur, prev);
+        if (next < 0) break;
+        visited.add(key(cur, next));
+        prev = cur; cur = next;
+        pts.push([cur % W, Math.floor(cur / W)]);
+        if (cur === start) break;
+        if (deg[cur] !== 2) break;
+      }
+      return pts;
+    }
+
+    // 1) 분기점·끝점에서 출발
+    for (var a = 0; a < idxs.length; a++) {
+      var i0 = idxs[a];
+      if (deg[i0] === 2) continue;
+      var x0 = i0 % W, y0 = (i0 - x0) / W;
+      for (var dy0 = -1; dy0 <= 1; dy0++) {
+        for (var dx0 = -1; dx0 <= 1; dx0++) {
+          if (!dx0 && !dy0) continue;
+          var nx0 = x0 + dx0, ny0 = y0 + dy0;
+          if (nx0 < 0 || ny0 < 0 || nx0 >= W || ny0 >= H) continue;
+          var n0 = ny0 * W + nx0;
+          if (!ink[n0] || visited.has(key(i0, n0))) continue;
+          var pts0 = walk(i0);
+          if (pts0.length > 2) lines.push(pts0);
+        }
+      }
+    }
+
+    // 2) 남은 순환선
+    for (var b = 0; b < idxs.length; b++) {
+      var i1 = idxs[b];
+      if (deg[i1] !== 2) continue;
+      var x1 = i1 % W, y1 = (i1 - x1) / W, touched = false;
+      for (var dy1 = -1; dy1 <= 1; dy1++) {
+        for (var dx1 = -1; dx1 <= 1; dx1++) {
+          if (!dx1 && !dy1) continue;
+          var nx1 = x1 + dx1, ny1 = y1 + dy1;
+          if (nx1 < 0 || ny1 < 0 || nx1 >= W || ny1 >= H) continue;
+          if (ink[ny1 * W + nx1] && visited.has(key(i1, ny1 * W + nx1))) touched = true;
+        }
+      }
+      if (touched) continue;
+      var pts1 = walk(i1);
+      if (pts1.length > 2) lines.push(pts1);
+    }
+
+    return lines;
+  }
+
+  /** 닫힌 영역(방) 추출 — 배경 플러드필 후 윤곽선 추적 */
+  function polygonize(ink, W, H, minArea) {
+    var label = new Int32Array(W * H).fill(-1);
+    var q = new Int32Array(W * H);
+    var comps = [];
+    var nextId = 0;
+
+    for (var i = 0; i < W * H; i++) {
+      if (ink[i] || label[i] !== -1) continue;
+      var id = nextId++;
+      var head = 0, tail = 0;
+      q[tail++] = i; label[i] = id;
+      var area = 0, minX = W, minY = H, maxX = 0, maxY = 0, touch = false;
+      var startIdx = i;
+      while (head < tail) {
+        var p = q[head++], x = p % W, y = (p - x) / W;
+        area++;
+        if (x < minX) { minX = x; startIdx = p; }
+        else if (x === minX && y < minY) { startIdx = p; }
+        if (x > maxX) maxX = x;
+        if (y < minY) minY = y;
+        if (y > maxY) maxY = y;
+        if (x === 0 || y === 0 || x === W - 1 || y === H - 1) touch = true;
+        for (var k = 0; k < 4; k++) {
+          var nx = x + (k === 0 ? 1 : k === 1 ? -1 : 0);
+          var ny = y + (k === 2 ? 1 : k === 3 ? -1 : 0);
+          if (nx < 0 || ny < 0 || nx >= W || ny >= H) continue;
+          var n = ny * W + nx;
+          if (ink[n] || label[n] !== -1) continue;
+          label[n] = id; q[tail++] = n;
+        }
+      }
+      comps.push({ id: id, area: area, touch: touch, bbox: { x: minX, y: minY, w: maxX - minX + 1, h: maxY - minY + 1 } });
+    }
+
+    var dirs = [[1, 0], [1, 1], [0, 1], [-1, 1], [-1, 0], [-1, -1], [0, -1], [1, -1]];
+    var inside = function (x, y, id) { return x >= 0 && y >= 0 && x < W && y < H && label[y * W + x] === id; };
+
+    function contour(cx, cy, id) {
+      var pts = [], sx = cx, sy = cy, dir = 0, guard = 0;
+      do {
+        pts.push([cx, cy]);
+        var found = false;
+        for (var k = 0; k < 8; k++) {
+          var d = (dir + 6 + k) % 8;
+          var nx = cx + dirs[d][0], ny = cy + dirs[d][1];
+          if (inside(nx, ny, id)) { cx = nx; cy = ny; dir = d; found = true; break; }
+        }
+        if (!found) break;
+      } while (!(cx === sx && cy === sy) && guard++ < 30000);
+      return pts;
+    }
+
+    var regions = [];
+    for (var c = 0; c < comps.length; c++) {
+      var comp = comps[c];
+      if (comp.touch || comp.area < minArea) continue;
+      // 시작 픽셀 찾기
+      var sx = -1, sy = -1;
+      for (var yy = comp.bbox.y; yy < comp.bbox.y + comp.bbox.h && sx < 0; yy++) {
+        for (var xx = comp.bbox.x; xx < comp.bbox.x + comp.bbox.w; xx++) {
+          if (label[yy * W + xx] === comp.id) { sx = xx; sy = yy; break; }
+        }
+      }
+      if (sx < 0) continue;
+      var raw = contour(sx, sy, comp.id);
+      if (raw.length < 8) continue;
+      var simple = rdp(raw, 1.6);
+      if (simple.length < 4) simple = raw.filter(function (_, k) { return k % 4 === 0; });
+      regions.push({ pts: simple, area: comp.area, bbox: comp.bbox, closed: true });
+    }
+    regions.sort(function (a, b) { return b.area - a.area; });
+    return regions;
+  }
+
+  function traceRaster(imgData, opts) {
+    var o = opts || {};
+    var W = imgData.width, H = imgData.height;
+    var data = imgData.data;
+
+    var gray = new Uint8Array(W * H);
+    for (var i = 0, j = 0; i < data.length; i += 4, j++) {
+      var a = data[i + 3] / 255;
+      var r = data[i] * a + 255 * (1 - a);
+      var g = data[i + 1] * a + 255 * (1 - a);
+      var b = data[i + 2] * a + 255 * (1 - a);
+      gray[j] = (0.299 * r + 0.587 * g + 0.114 * b) | 0;
+    }
+
+    var thr = otsu(gray);
+    var ink = new Uint8Array(W * H);
+    var inkCount = 0;
+    for (var k = 0; k < gray.length; k++) { var v = gray[k] < thr ? 1 : 0; ink[k] = v; inkCount += v; }
+    var inverted = false;
+    if (inkCount > W * H * 0.5) { inverted = true; for (var m = 0; m < ink.length; m++) ink[m] ^= 1; }
+
+    var skeleton = thin(ink, W, H);
+    var rawLines = traceSkeleton(skeleton, W, H);
+
+    var polys = [];
+    var totalPts = 0;
+    for (var n = 0; n < rawLines.length; n++) {
+      var line = rawLines[n];
+      if (line.length < 6) continue;
+      var simple = rdp(line, 1.15);
+      if (simple.length < 2) continue;
+      polys.push({ pts: simple, closed: false, layer: 'trace' });
+      totalPts += simple.length;
+      if (polys.length > 6000) break;
+    }
+
+    var minArea = Math.max(400, W * H * 0.0025);
+    var regionsPx = polygonize(ink, W, H, minArea);
+
+    // 픽셀 → viewBox 좌표 (이미지 letterbox 정렬)
+    var tw = o.tw || 1000, th = o.th || 680, pad = o.pad == null ? 8 : o.pad;
+    var s = Math.min((tw - pad * 2) / W, (th - pad * 2) / H);
+    var rect = { x: (tw - W * s) / 2, y: (th - H * s) / 2, w: W * s, h: H * s };
+    var mapPt = function (p) { return [rect.x + p[0] * s, rect.y + p[1] * s]; };
+
+    var mappedPolys = polys.map(function (p) { return { pts: p.pts.map(mapPt), closed: p.closed, layer: p.layer }; });
+    var mappedRegions = regionsPx.map(function (r) {
+      return { pts: r.pts.map(mapPt), area: r.area, bbox: r.bbox, closed: true };
+    });
+
+    return {
+      polys: mappedPolys,
+      regions: mappedRegions,
+      rect: rect,
+      stats: {
+        format: 'RASTER',
+        entities: rawLines.length,
+        lines: polys.length,
+        points: totalPts,
+        threshold: thr,
+        inverted: inverted,
+        regions: mappedRegions.length,
+        extents: { w: W, h: H },
+        byType: { skeletonSegments: polys.length },
+      },
+    };
+  }
+
+  return {
+    parseDxf: parseDxf,
+    svgToPolys: svgToPolys,
+    traceRaster: traceRaster,
+    toPathData: toPathData,
+    bboxOf: bboxOf,
+    fit: fit,
+    rdp: rdp,
+  };
+})();
+
+</script>
+<script type="text/babel" data-presets="react">
+const { useState, useMemo, useCallback, useEffect, useRef } = React;
+
+/* ================================================================
+ * 1. DATA — 잠실점 B1 비정형 매장 6구역 (면적 합계 200평)
+ *    기준 지표: 총매출 30.0억 · 평균 평효율 1,502만/평 · 수수료 5.15억 (17.1%)
+ * ================================================================ */
+
+const VIEWBOX = { w: 1000, h: 680 };
+
+const ZONES_BASE = [
+  {
+    id: 'Z-01', area: 35, status: '우수',
+    locationType: '북서측 원형광장 부채꼴 파사드',
+    currentBrand: { name: '바샤커피 (Bacha)', category: '카페', pyeongEfficiency: 2400, commissionRate: 18 },
+    isReplaced: false,
+    // 북측 호(Arc)를 따라 휘어진 부채꼴
+    path: 'M 70,160 Q 220,100 310,140 L 290,260 L 90,250 Q 70,250 70,160 Z',
+    center: { x: 182, y: 198 },
+    labelWidth: 200,
+  },
+  {
+    id: 'Z-02', area: 20, status: '부진',
+    locationType: '북동측 사선 챔퍼(Chamfer)',
+    currentBrand: { name: '올드 베이커리', category: '베이커리', pyeongEfficiency: 980, commissionRate: 15 },
+    isReplaced: false,
+    // 동측 사선 외벽을 따라 깎인 5각형
+    path: 'M 690,130 L 870,110 L 920,230 L 730,260 L 690,180 Z',
+    center: { x: 802, y: 184 },
+    labelWidth: 190,
+  },
+  {
+    id: 'Z-03', area: 25, status: '부진',
+    locationType: '서측 사선 평행사변형 스트리트',
+    currentBrand: { name: '아메리칸 샌드위치', category: '델리', pyeongEfficiency: 920, commissionRate: 21 },
+    isReplaced: false,
+    // 기둥 코어를 피해 기울어진 4각형
+    path: 'M 75,295 L 265,305 L 285,420 L 90,410 Z',
+    center: { x: 178, y: 358 },
+    labelWidth: 185,
+  },
+  {
+    id: 'Z-04', area: 15, status: '부진',
+    locationType: '중앙 코어 보이드 유선형 아일랜드',
+    currentBrand: { name: '전통 모나카 부티크', category: '디저트', pyeongEfficiency: 850, commissionRate: 20 },
+    isReplaced: false,
+    // 유선형 조약돌(Pebble) — 하단을 8px 올려 Z-06과 부딪히지 않게 함
+    path: 'M 640,320 C 720,290 760,350 720,390 C 660,420 610,360 640,320 Z',
+    center: { x: 675, y: 355 },
+    labelWidth: 118,
+  },
+  {
+    id: 'Z-05', area: 40, status: '보통',
+    locationType: '남서측 L자형 대형 식당가',
+    currentBrand: { name: '고든램지 스트리트 버거', category: '다이닝', pyeongEfficiency: 1750, commissionRate: 19 },
+    isReplaced: false,
+    // 롯데월드 통로를 품은 L자
+    path: 'M 75,450 L 315,460 L 315,580 L 195,580 L 195,515 L 75,510 Z',
+    center: { x: 196, y: 516 },
+    labelWidth: 205,
+  },
+  {
+    id: 'Z-06', area: 65, status: '앵커',
+    locationType: '남동측 에비뉴엘 연결 사다리꼴',
+    currentBrand: { name: '레피세리 와인 & 마켓', category: '주류/식품', pyeongEfficiency: 1400, commissionRate: 14 },
+    isReplaced: false,
+    // 동측 사선 외벽을 수용한 사다리꼴
+    path: 'M 670,420 L 920,380 L 870,580 L 660,580 Z',
+    center: { x: 782, y: 492 },
+    labelWidth: 225,
+  },
+];
+
+const CANDIDATES = [
+  { id: 'C-01', name: '런던베이글뮤지엄', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, tag: '오픈런 1위 앵커', initials: 'LB' },
+  { id: 'C-02', name: '노티드 월드', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, tag: '2030 패밀리 선호', initials: 'KW' },
+  { id: 'C-03', name: '삐아프 쇼콜라', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, tag: '고마진 선물 수요', initials: 'PF' },
+  { id: 'C-04', name: '땀땀 (TamTam)', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, tag: '회전율 보장 맛집', initials: 'TT' },
+  { id: 'C-05', name: '카멜커피', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, tag: 'MZ 바이럴 핫플', initials: 'CC' },
+  { id: 'C-06', name: '트러플 아티장 델리', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, tag: '와인 페어링 고단가', initials: 'TD' },
+];
+
+const CAT_TAG = {
+  카페: { bg: '#F0F9FF', fg: '#0369A1', bd: '#BAE6FD' },
+  베이커리: { bg: '#FFFBEB', fg: '#B45309', bd: '#FDE68A' },
+  디저트: { bg: '#FDF2F8', fg: '#BE185D', bd: '#FBCFE8' },
+  델리: { bg: '#ECFDF5', fg: '#047857', bd: '#A7F3D0' },
+  다이닝: { bg: '#EEF2FF', fg: '#4338CA', bd: '#C7D2FE' },
+  '주류/식품': { bg: '#F5F3FF', fg: '#6D28D9', bd: '#DDD6FE' },
+};
+
+function catStyle(category) {
+  const c = CAT_TAG[category] || { bg: '#F8FAFC', fg: '#475569', bd: '#E2E8F0' };
+  return { background: c.bg, color: c.fg, border: `1px solid ${c.bd}` };
+}
+
+/* ================================================================
+ * 2. HELPERS
+ * ================================================================ */
+
+const nf = new Intl.NumberFormat('ko-KR');
+const man = (v) => nf.format(Math.round(v));
+const eok = (v, d = 1) => (v / 10000).toFixed(d);
+const signed = (v, d) => `${v > 0 ? '+' : v < 0 ? '-' : ''}${Math.abs(v).toFixed(d)}`;
+
+/** 층 합계 지표. rev·comm 단위는 억 원, eff 는 만 원/평. */
+function metricsOf(zones) {
+  let rev = 0;
+  let comm = 0;
+  let pyeong = 0;
+  zones.forEach((z) => {
+    const r = (z.area * z.currentBrand.pyeongEfficiency) / 10000;
+    rev += r;
+    comm += r * (z.currentBrand.commissionRate / 100);
+    pyeong += z.area;
+  });
+  return { rev, comm, eff: pyeong ? (rev * 10000) / pyeong : 0, pyeong };
+}
+
+const cloneBase = () => ZONES_BASE.map((z) => ({ ...z, currentBrand: { ...z.currentBrand } }));
+
+/* ================================================================
+ * 3. ICONS (lucide UMD 노드 = ['svg', attrs, children])
+ * ================================================================ */
+
+const ICONS = new Map();
+const ATTR_MAP = {
+  'stroke-width': 'strokeWidth', 'stroke-linecap': 'strokeLinecap',
+  'stroke-linejoin': 'strokeLinejoin', 'stroke-dasharray': 'strokeDasharray',
+  'fill-rule': 'fillRule', 'clip-rule': 'clipRule',
+};
+
+function Icon({ name, size = 14, stroke = 2, className = '' }) {
+  if (!ICONS.has(name)) {
+    const lib = typeof window !== 'undefined' ? window.lucide : null;
+    ICONS.set(name, lib && lib[name] ? lib[name] : null);
+  }
+  const node = ICONS.get(name);
+  if (!node || !Array.isArray(node[2])) return null;
+  const kids = node[2].map((child, i) => {
+    const [tag, raw] = child;
+    const props = { key: `${tag}-${i}` };
+    Object.entries(raw || {}).forEach(([k, v]) => { props[ATTR_MAP[k] || k] = v; });
+    return React.createElement(tag, props);
+  });
+  return (
+    <svg xmlns="http://www.w3.org/2000/svg" width={size} height={size} viewBox="0 0 24 24"
+      fill="none" stroke="currentColor" strokeWidth={stroke} strokeLinecap="round"
+      strokeLinejoin="round" className={className} aria-hidden="true" focusable="false">
+      {kids}
+    </svg>
+  );
+}
+
+/* ================================================================
+ * 4. ATOMS
+ * ================================================================ */
+
+function DeltaPill({ value, unit, digits = 1 }) {
+  const zero = Math.abs(value) < (digits > 1 ? 0.005 : 0.5);
+  const cls = zero
+    ? 'bg-slate-100 text-slate-500'
+    : value > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700';
+  return (
+    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black tabular ${cls}`}>
+      {zero ? '기준' : `${value > 0 ? '▲ +' : '▼ '}${Math.abs(value).toFixed(digits)}${unit}`}
+    </span>
+  );
+}
+
+function KpiCapsule({ label, value, unit, delta, deltaUnit, digits, footnote }) {
+  return (
+    <div className="flex items-center gap-3 rounded-xl border border-slate-200/90 bg-slate-50 px-4 py-2">
+      <div className="min-w-0">
+        <p className="whitespace-nowrap text-[10px] font-bold text-slate-400">{label}</p>
+        <p className="mt-0.5 whitespace-nowrap text-lg font-black leading-none tabular tracking-tight text-slate-900">
+          {value}<span className="ml-1 text-xs font-semibold text-slate-500">{unit}</span>
+        </p>
+      </div>
+      <div className="flex flex-col items-end gap-1">
+        <DeltaPill value={delta} unit={deltaUnit} digits={digits} />
+        {footnote ? <span className="whitespace-nowrap text-[9.5px] font-semibold tabular text-slate-400">{footnote}</span> : null}
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+ * 5. ZONE POLYGON — 비정형 SVG 매장 블록
+ * ================================================================ */
+
+function ZoneShape({ zone, hovered, selected, onHover, onApply, onLeave, ghost }) {
+  const replaced = zone.isReplaced;
+  const warning = !replaced && zone.status === '부진';
+  const small = zone.id === 'Z-04';
+  const brand = zone.currentBrand;
+
+  const fill = replaced ? '#ECFDF5' : hovered ? '#FFF1F2' : '#FFFFFF';
+  const stroke = replaced ? '#059669' : hovered ? '#E60012' : warning ? '#F59E0B' : '#CBD5E1';
+  const strokeWidth = replaced ? 3 : hovered ? 2.6 : 1.5;
+
+  const { x: cx, y: cy } = zone.center;
+  const nameFs = Math.max(9, Math.min(small ? 12 : 14, (zone.labelWidth * 0.94) / Math.max(1, brand.name.length)));
+  const subFs = small ? 8.5 : 10;
+  const idFs = small ? 8.5 : 10;
+  const revFs = small ? 10.5 : 12;
+
+  const idY = small ? cy - 26 : cy - 32;
+  const nameY = small ? cy + 1 : cy - 2;
+  const subY = small ? cy + 15 : cy + 18;
+  const revY = small ? cy + 29 : cy + 36;
+
+  const subText = small
+    ? `${man(brand.pyeongEfficiency)}만 · ${brand.commissionRate}%`
+    : `평효율 ${man(brand.pyeongEfficiency)}만 · ${brand.commissionRate}%`;
+
+  const monthly = (zone.area * brand.pyeongEfficiency) / 10000;
+
+  return (
+    <g
+      role="button"
+      tabIndex={0}
+      data-zone={zone.id}
+      aria-label={`${zone.id} ${zone.locationType} ${zone.area}평 ${brand.name} ${brand.category} 평효율 ${man(brand.pyeongEfficiency)}만 원 월매출 ${monthly.toFixed(2)}억 원 수수료율 ${brand.commissionRate}퍼센트`}
+      className="cursor-pointer outline-none"
+      onMouseEnter={() => onHover(zone.id)}
+      onMouseLeave={onLeave}
+      onClick={() => onApply(zone.id)}
+      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onApply(zone.id); } }}
+      onDragOver={(ev) => { ev.preventDefault(); ev.dataTransfer.dropEffect = 'copy'; onHover(zone.id); }}
+      onDrop={(ev) => {
+        ev.preventDefault();
+        const raw = ev.dataTransfer.getData('application/json');
+        if (raw) { try { const brand = JSON.parse(raw); onApply(zone.id, brand); } catch (e) { /* 무시 */ } }
+      }}
+    >
+      <path
+        className="zone-shape"
+        d={zone.path}
+        fill={fill}
+        fillOpacity={ghost ? 0.62 : 1}
+        stroke={stroke}
+        strokeWidth={strokeWidth}
+        strokeLinejoin="round"
+        filter="url(#soft-shadow)"
+      />
+
+      {/* 선택된 후보가 있으면 매장 위에 드롭 힌트 */}
+      {selected ? (
+        <path d={zone.path} fill="none" stroke="#E60012" strokeWidth="2" strokeOpacity="0.45" strokeLinejoin="round" />
+      ) : null}
+
+      {/* NEW 뱃지 / 개편요망 칩 */}
+      {replaced ? (
+        <g transform={`translate(${cx - (small ? 20 : 28)}, ${idY - (small ? 23 : 28)})`}>
+          <rect width={small ? 40 : 56} height={small ? 13 : 15} rx={small ? 6.5 : 7.5} fill="#059669" />
+          <text x={small ? 20 : 28} y={small ? 9.5 : 10.8} textAnchor="middle" fill="#FFFFFF" fontSize={small ? 7.5 : 8.5} fontWeight="900">NEW</text>
+        </g>
+      ) : warning ? (
+        <g transform={`translate(${cx - (small ? 24 : 38)}, ${idY - (small ? 23 : 28)})`}>
+          <rect width={small ? 48 : 76} height={small ? 13 : 15} rx={small ? 6.5 : 7.5} fill="#FEF3C7" stroke="#F59E0B" strokeWidth="1" />
+          <text x={small ? 24 : 38} y={small ? 9.5 : 10.8} textAnchor="middle" fill="#B45309" fontSize={small ? 7 : 8} fontWeight="800">
+            {small ? '⚠ 개선' : '⚠ 개편요망'}
+          </text>
+        </g>
+      ) : null}
+
+      <text x={cx} y={idY} textAnchor="middle" fill="#64748B" fontSize={idFs} fontWeight="800" fontFamily="Pretendard, sans-serif">
+        {zone.id} · {zone.area}평
+      </text>
+
+      <text x={cx} y={nameY} textAnchor="middle" fill="#0F172A" fontSize={nameFs} fontWeight="900" fontFamily="Pretendard, sans-serif">
+        {brand.name}
+      </text>
+
+      <text x={cx} y={subY} textAnchor="middle" fill="#64748B" fontSize={subFs} fontWeight="600" fontFamily="Pretendard, sans-serif">
+        {subText}
+      </text>
+
+      <text x={cx} y={revY} textAnchor="middle" fill="#E60012" fontSize={revFs} fontWeight="900" fontFamily="Pretendard, sans-serif">
+        월 {monthly.toFixed(2)}억
+      </text>
+    </g>
+  );
+}
+
+/* ================================================================
+ * 6. FLOOR PLAN
+ * ================================================================ */
+
+const OUTER_PATH = 'M 50,140 Q 500,40 920,110 L 960,380 L 890,620 L 320,620 L 50,560 Z';
+const CORRIDOR = 'M 500,70 Q 400,180 370,280 Q 340,410 520,500 L 610,625';
+
+function FloorPlan({ zones, hovered, selected, onHover, onApply, onLeave, plan, showZones, analysis, showTrace, showRegions }) {
+  // DXF처럼 배경 이미지 없이 벡터 라인만 있는 도면도 '업로드됨'으로 취급한다
+  const uploaded = Boolean(plan);
+
+  return (
+    <svg viewBox={`0 0 ${VIEWBOX.w} ${VIEWBOX.h}`} className="h-full w-full" preserveAspectRatio="xMidYMid meet"
+      role="img" aria-label="잠실점 지하 1층 식품관 평면도">
+      <defs>
+        <filter id="soft-shadow" x="-8%" y="-8%" width="116%" height="116%">
+          <feDropShadow dx="0" dy="2" stdDeviation="3" floodColor="#0F172A" floodOpacity="0.06" />
+        </filter>
+        <linearGradient id="marble" x1="0" y1="0" x2="1" y2="1">
+          <stop offset="0%" stopColor="#F8FAFC" />
+          <stop offset="55%" stopColor="#F1F5F9" />
+          <stop offset="100%" stopColor="#E9EEF5" />
+        </linearGradient>
+      </defs>
+
+      {uploaded ? (
+        <g>
+          <rect x="0" y="0" width={VIEWBOX.w} height={VIEWBOX.h} fill="#FFFFFF" />
+          {plan.url ? (
+            analysis && analysis.rect ? (
+              // 래스터: 추적선과 같은 letterbox 사각형에 그려야 어긋나지 않는다
+              <image
+                href={plan.url}
+                x={analysis.rect.x} y={analysis.rect.y}
+                width={analysis.rect.w} height={analysis.rect.h}
+                preserveAspectRatio="none"
+                style={{ pointerEvents: 'none', opacity: showTrace ? 0.26 : 1 }}
+              />
+            ) : (
+              <image
+                href={plan.url}
+                x="0" y="0" width={VIEWBOX.w} height={VIEWBOX.h}
+                preserveAspectRatio="xMidYMid meet"
+                style={{ pointerEvents: 'none', opacity: showTrace ? 0.26 : 1 }}
+              />
+            )
+          ) : null}
+
+          {/* 해석된 라인 — 벽체/동선 */}
+          {showTrace && analysis && analysis.pathD ? (
+            <path
+              d={analysis.pathD}
+              fill="none"
+              stroke="#0F172A"
+              strokeWidth="1.1"
+              strokeLinejoin="round"
+              strokeLinecap="round"
+              opacity="0.82"
+              style={{ pointerEvents: 'none' }}
+            />
+          ) : null}
+
+          {/* 닫힌 영역(실/팝업 후보) */}
+          {showRegions && analysis && analysis.regionD ? (
+            <path
+              d={analysis.regionD}
+              fill="rgba(230,0,18,0.05)"
+              stroke="#E60012"
+              strokeWidth="1.4"
+              strokeDasharray="6 4"
+              strokeLinejoin="round"
+              opacity="0.85"
+              style={{ pointerEvents: 'none' }}
+            />
+          ) : null}
+        </g>
+      ) : (
+        <g>
+          {/* 비정형 외벽 */}
+          <path d={OUTER_PATH} fill="url(#marble)" stroke="#CBD5E1" strokeWidth="2" />
+          <path d={OUTER_PATH} fill="none" stroke="#E2E8F0" strokeWidth="6" opacity="0.6" />
+
+          {/* 주 동선 (곡선 복도) */}
+          <path d={CORRIDOR} fill="none" stroke="#FFFFFF" strokeWidth="52" strokeLinecap="round" />
+          <path d={CORRIDOR} fill="none" stroke="#E2E8F0" strokeWidth="52" strokeLinecap="round" opacity="0.55" />
+          <path d={CORRIDOR} fill="none" stroke="#FFFFFF" strokeWidth="46" strokeLinecap="round" />
+          <path d={CORRIDOR} fill="none" stroke="#CBD5E1" strokeWidth="1.6" strokeDasharray="7 7" opacity="0.9" />
+
+          {/* 중앙 에스컬레이터 코어 */}
+          <g>
+            <rect x="370" y="270" width="180" height="140" rx="14" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="1.5" filter="url(#soft-shadow)" />
+            <rect x="392" y="288" width="136" height="34" rx="6" fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="1" />
+            <text x="460" y="309" textAnchor="middle" fill="#475569" fontSize="10.5" fontWeight="800" fontFamily="Pretendard, sans-serif">▲ 1F 명품관</text>
+            <rect x="392" y="330" width="136" height="34" rx="6" fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="1" />
+            <text x="460" y="351" textAnchor="middle" fill="#475569" fontSize="10.5" fontWeight="800" fontFamily="Pretendard, sans-serif">▼ B2 주차·마트</text>
+            <text x="460" y="386" textAnchor="middle" fill="#94A3B8" fontSize="8" fontWeight="700" letterSpacing="1.4" fontFamily="Pretendard, sans-serif">CENTRAL CORE VOID</text>
+          </g>
+        </g>
+      )}
+
+      {/* 6개 비정형 매장 */}
+      {showZones ? (
+        <g>
+          {zones.map((zone) => (
+            <ZoneShape
+              key={zone.id}
+              zone={zone}
+              hovered={hovered === zone.id}
+              selected={selected}
+              onHover={onHover}
+              onApply={onApply}
+              onLeave={onLeave}
+              ghost={uploaded}
+            />
+          ))}
+        </g>
+      ) : null}
+
+      {/* 기본 도면일 때만 게이트 표시 */}
+      {uploaded ? null : (
+        <g>
+          <line x1="330" y1="72" x2="330" y2="104" stroke="#CBD5E1" strokeWidth="1.4" strokeDasharray="3 3" />
+          <line x1="670" y1="76" x2="670" y2="98" stroke="#CBD5E1" strokeWidth="1.4" strokeDasharray="3 3" />
+          <rect x="250" y="24" width="500" height="40" rx="20" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="1.5" filter="url(#soft-shadow)" />
+          <circle cx="280" cy="44" r="10" fill="#E60012" />
+          <text x="280" y="48" textAnchor="middle" fill="#FFFFFF" fontSize="10" fontWeight="900" fontFamily="Pretendard, sans-serif">2</text>
+          <text x="510" y="48.5" textAnchor="middle" fill="#1E293B" fontSize="12" fontWeight="800" fontFamily="Pretendard, sans-serif">
+            2호선 잠실역 지하광장 · 트레비 분수 진입
+          </text>
+
+          <rect x="60" y="588" width="232" height="30" rx="15" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="1.5" filter="url(#soft-shadow)" />
+          <text x="176" y="607.5" textAnchor="middle" fill="#334155" fontSize="10.5" fontWeight="800" fontFamily="Pretendard, sans-serif">
+            롯데월드 어드벤처 진입 통로
+          </text>
+          <rect x="686" y="588" width="246" height="30" rx="15" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="1.5" filter="url(#soft-shadow)" />
+          <text x="809" y="607.5" textAnchor="middle" fill="#334155" fontSize="10.5" fontWeight="800" fontFamily="Pretendard, sans-serif">
+            에비뉴엘 · 월드몰 연결 통로 →
+          </text>
+        </g>
+      )}
+    </svg>
+  );
+}
+
+/* ================================================================
+ * 7. CANDIDATE CARD
+ * ================================================================ */
+
+function CandidateCard({ brand, selected, usedCount, onSelect, onDragStart }) {
+  return (
+    <div
+      role="button"
+      tabIndex={0}
+      aria-pressed={selected}
+      aria-label={`${brand.id} ${brand.name} ${brand.category} 평효율 ${man(brand.pyeongEfficiency)}만 원 수수료 ${brand.commissionRate}퍼센트`}
+      draggable
+      onDragStart={(ev) => {
+        ev.dataTransfer.setData('application/json', JSON.stringify(brand));
+        ev.dataTransfer.effectAllowed = 'copy';
+        onDragStart(brand);
+      }}
+      onClick={() => onSelect(brand.id)}
+      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onSelect(brand.id); } }}
+      className={`cand-card flex cursor-grab items-center justify-between gap-2 rounded-xl border p-2.5 active:cursor-grabbing ${
+        selected
+          ? 'border-rose-500 bg-rose-50/70 ring-2 ring-rose-500/15'
+          : 'border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-card'
+      }`}
+    >
+      <div className="flex min-w-0 items-center gap-2.5">
+        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-[11px] font-black ${
+          selected ? 'border-rose-200 bg-white text-rose-700' : 'border-slate-200 bg-slate-100 text-slate-700'
+        }`}>
+          {brand.initials}
+        </div>
+        <div className="min-w-0">
+          <div className="flex items-center gap-1.5">
+            <span className="truncate text-xs font-black tracking-tight text-slate-900">{brand.name}</span>
+            {usedCount > 0 ? (
+              <span className="shrink-0 rounded-full bg-slate-900 px-1.5 py-[1px] text-[9px] font-bold text-white">{usedCount}</span>
+            ) : null}
+          </div>
+          <div className="mt-0.5 flex items-center gap-1.5">
+            <span className="shrink-0 rounded px-1.5 py-[1px] text-[9px] font-bold" style={catStyle(brand.category)}>{brand.category}</span>
+            <span className="truncate text-[10px] font-medium text-slate-400">{brand.tag}</span>
+          </div>
+        </div>
+      </div>
+      <div className="flex shrink-0 items-center gap-2 text-right">
+        <div>
+          <p className="text-[11.5px] font-black tabular tracking-tight text-slate-900">
+            {man(brand.pyeongEfficiency)}<span className="ml-0.5 text-[9px] font-semibold text-slate-400">만</span>
+          </p>
+          <p className="text-[10px] font-bold tabular text-rose-600">{brand.commissionRate}%</p>
+        </div>
+        <Icon name="GripVertical" size={13} className="text-slate-300" />
+      </div>
+    </div>
+  );
+}
+
+/* ================================================================
+ * 8. APP
+ * ================================================================ */
+
+function App() {
+  const [zones, setZones] = useState(cloneBase);
+  const [selectedCandidate, setSelectedCandidate] = useState(null);
+  const [hoveredZoneId, setHoveredZoneId] = useState(null);
+  const [toast, setToast] = useState(null);
+  const toastTimer = useRef(null);
+  const [plan, setPlan] = useState(null);       // { url, name, kind, analysis }
+  const [analysis, setAnalysis] = useState(null); // { polys, regions, stats, pathD, regionD }
+  const [parsing, setParsing] = useState(null);   // 진행 메시지
+  const [parseError, setParseError] = useState(null);
+  const [showZones, setShowZones] = useState(true);
+  const [showTrace, setShowTrace] = useState(true);
+  const [showRegions, setShowRegions] = useState(false);
+  const [drawHover, setDrawHover] = useState(false);
+  const fileRef = useRef(null);
+  const planUrlRef = useRef(null);
+
+  const initialMetrics = useMemo(() => metricsOf(ZONES_BASE), []);
+  const currentMetrics = useMemo(() => metricsOf(zones), [zones]);
+
+  const usedCounts = useMemo(() => {
+    const counts = {};
+    zones.forEach((z) => {
+      if (!z.isReplaced) return;
+      counts[z.currentBrand.name] = (counts[z.currentBrand.name] || 0) + 1;
+    });
+    return counts;
+  }, [zones]);
+
+  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+
+  // 언마운트 시 마지막 blob URL 해제
+  useEffect(() => () => {
+    if (planUrlRef.current) URL.revokeObjectURL(planUrlRef.current);
+  }, []);
+
+  const notify = useCallback((message) => {
+    setToast(message);
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    toastTimer.current = setTimeout(() => setToast(null), 1900);
+  }, []);
+
+  const handleApply = useCallback((zoneId, brandArg) => {
+    const brand = brandArg || CANDIDATES.find((c) => c.id === selectedCandidate);
+    if (!brand) { notify('오른쪽 후보 브랜드를 먼저 선택해 주세요'); return; }
+    setZones((prev) => prev.map((z) => (
+      z.id === zoneId
+        ? { ...z, currentBrand: { name: brand.name, category: brand.category, pyeongEfficiency: brand.pyeongEfficiency, commissionRate: brand.commissionRate }, isReplaced: true }
+        : z
+    )));
+    setSelectedCandidate(null);
+    setHoveredZoneId(null);
+    notify(`${zoneId} · ${brand.name} 적용`);
+  }, [selectedCandidate, notify]);
+
+  const handleRevert = useCallback((zoneId) => {
+    setZones((prev) => prev.map((z) => {
+      if (z.id !== zoneId) return z;
+      const base = ZONES_BASE.find((b) => b.id === zoneId);
+      return { ...z, currentBrand: { ...base.currentBrand }, isReplaced: false };
+    }));
+    notify(`${zoneId} 원래 브랜드로 복원`);
+  }, [notify]);
+
+  /* ---------------- 도면 해석 파이프라인 ---------------- */
+
+  const resetAnalysis = useCallback(() => {
+    setAnalysis(null);
+    setParseError(null);
+  }, []);
+
+  /** PDF → 첫 페이지를 캔버스로 렌더 */
+  const renderPdfFirstPage = useCallback(async (buf) => {
+    const pdfjs = window.pdfjsLib;
+    if (!pdfjs) throw new Error('PDF 엔진을 불러오지 못했습니다 (네트워크 확인)');
+    pdfjs.GlobalWorkerOptions.workerSrc = 'https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.worker.min.js';
+    const doc = await pdfjs.getDocument({ data: buf }).promise;
+    const page = await doc.getPage(1);
+    const baseView = page.getViewport({ scale: 1 });
+    const scale = Math.min(3, Math.max(1, 1800 / Math.max(baseView.width, baseView.height)));
+    const viewport = page.getViewport({ scale });
+    const canvas = document.createElement('canvas');
+    canvas.width = Math.round(viewport.width);
+    canvas.height = Math.round(viewport.height);
+    const ctx = canvas.getContext('2d');
+    ctx.fillStyle = '#FFFFFF';
+    ctx.fillRect(0, 0, canvas.width, canvas.height);
+    await page.render({ canvasContext: ctx, viewport }).promise;
+    return { canvas, pages: doc.numPages };
+  }, []);
+
+  const analyzeFile = useCallback(async (file) => {
+    const P = window.PlanParser;
+    const name = file.name;
+    const ext = (name.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+    const VB = { w: 1000, h: 680, pad: 18 };
+
+    // --- DXF ---
+    if (ext === 'dxf') {
+      setParsing('DXF 엔티티 해석 중…');
+      const text = await file.text();
+      const res = P.parseDxf(text);
+      if (!res.polys.length) throw new Error('DXF에서 그릴 수 있는 선을 찾지 못했습니다 (블록/레이어 확인)');
+      return { patches: res.polys, regions: [], stats: res.stats, kind: 'DXF', vector: true };
+    }
+
+    // --- SVG ---
+    if (ext === 'svg' || file.type === 'image/svg+xml') {
+      setParsing('SVG 도형 추출 중…');
+      const text = await file.text();
+      const res = P.svgToPolys(text, VB.w, VB.h, VB.pad);
+      if (!res.polys.length) throw new Error('SVG에서 그릴 수 있는 도형을 찾지 못했습니다');
+      return { patches: res.polys, regions: [], stats: res.stats, kind: 'SVG', vector: true, svgText: text };
+    }
+
+    // --- PDF ---
+    if (ext === 'pdf' || file.type === 'application/pdf') {
+      setParsing('PDF 첫 페이지 렌더링 중…');
+      const buf = await file.arrayBuffer();
+      const { canvas, pages } = await renderPdfFirstPage(buf);
+      setParsing('PDF 선 추적 중… (세선화)');
+      await new Promise((r) => setTimeout(r, 30));
+      const ctx = canvas.getContext('2d');
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const res = P.traceRaster(imgData, { tw: VB.w, th: VB.h, pad: VB.pad });
+      if (!res.polys.length && !res.regions.length) throw new Error('PDF에서 선을 추적하지 못했습니다');
+      res.stats.pages = pages;
+      res.stats.format = 'PDF';
+      return { patches: res.polys, regions: res.regions, stats: res.stats, kind: 'PDF', raster: canvas };
+    }
+
+    // --- PNG / JPG ---
+    if (/^image\//.test(file.type || '') || /^(png|jpe?g|webp|gif|bmp)$/i.test(ext)) {
+      setParsing('이미지 디코딩 중…');
+      const bitmap = await createImageBitmap(file);
+      const maxSide = 1500;
+      const sc = Math.min(1, maxSide / Math.max(bitmap.width, bitmap.height));
+      const canvas = document.createElement('canvas');
+      canvas.width = Math.max(1, Math.round(bitmap.width * sc));
+      canvas.height = Math.max(1, Math.round(bitmap.height * sc));
+      const ctx = canvas.getContext('2d');
+      ctx.fillStyle = '#FFFFFF';
+      ctx.fillRect(0, 0, canvas.width, canvas.height);
+      ctx.drawImage(bitmap, 0, 0, canvas.width, canvas.height);
+      setParsing('선 추적 중… (세선화)');
+      await new Promise((r) => setTimeout(r, 30));
+      const imgData = ctx.getImageData(0, 0, canvas.width, canvas.height);
+      const res = P.traceRaster(imgData, { tw: VB.w, th: VB.h, pad: VB.pad });
+      if (!res.polys.length && !res.regions.length) throw new Error('이미지에서 선을 추적하지 못했습니다');
+      res.stats.format = ext.toUpperCase();
+      return { patches: res.polys, regions: res.regions, stats: res.stats, kind: ext.toUpperCase(), raster: canvas };
+    }
+
+    throw new Error('지원하지 않는 형식입니다 — DXF / SVG / PDF / PNG / JPG');
+  }, [renderPdfFirstPage]);
+
+  const loadPlanFile = useCallback(async (file) => {
+    if (!file) return;
+    if (file.size > 40 * 1024 * 1024) { notify('파일이 40MB를 넘습니다 — 더 작은 도면을 쓰세요'); return; }
+
+    setParseError(null);
+    setParsing('도면 준비 중…');
+    try {
+      const out = await analyzeFile(file);
+
+      // 배경 이미지 URL
+      if (planUrlRef.current) URL.revokeObjectURL(planUrlRef.current);
+      let url = null;
+      if (out.svgText) {
+        url = URL.createObjectURL(new Blob([out.svgText], { type: 'image/svg+xml' }));
+      } else if (out.raster) {
+        const blob = await new Promise((res) => out.raster.toBlob(res, 'image/png'));
+        url = URL.createObjectURL(blob);
+      }
+      planUrlRef.current = url;
+
+      const pathD = window.PlanParser.toPathData(out.patches, 2);
+      const regionD = window.PlanParser.toPathData(out.regions, 2);
+
+      setAnalysis({ ...out, pathD, regionD });
+      setPlan({ url, name: file.name, kind: out.kind });
+      setShowZones(true);
+      setShowTrace(out.kind !== 'SVG');
+      notify(`${file.name} · 선 ${out.patches.length}개 해석 완료`);
+    } catch (err) {
+      setParseError(String(err && err.message ? err.message : err));
+      notify('도면 해석 실패 — 형식을 확인하세요');
+    } finally {
+      setParsing(null);
+    }
+  }, [analyzeFile, notify]);
+
+  const handlePickPlan = useCallback((ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    loadPlanFile(file);
+    ev.target.value = '';
+  }, [loadPlanFile]);
+
+  const handleClearPlan = useCallback(() => {
+    if (planUrlRef.current) { URL.revokeObjectURL(planUrlRef.current); planUrlRef.current = null; }
+    setPlan(null);
+    setAnalysis(null);
+    setParseError(null);
+    setShowZones(true);
+    notify('기본 도면으로 되돌렸습니다');
+  }, [notify]);
+
+  const handleReset = useCallback(() => {
+    setZones(cloneBase());
+    setSelectedCandidate(null);
+    setHoveredZoneId(null);
+    notify('초기 도면으로 복원했습니다');
+  }, [notify]);
+
+  const replacedZones = zones.filter((z) => z.isReplaced);
+  const deltaRev = currentMetrics.rev - initialMetrics.rev;
+  const deltaEff = currentMetrics.eff - initialMetrics.eff;
+  const deltaComm = currentMetrics.comm - initialMetrics.comm;
+
+  return (
+    <div className="flex h-full flex-col bg-[#F8FAFC]">
+      {/* ---------- HEADER ---------- */}
+      <header className="z-20 flex h-[74px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white/90 px-8 backdrop-blur-md">
+        <div className="flex shrink-0 items-center gap-3">
+          <span className="rounded-lg bg-lotte-red px-2.5 py-1 text-xs font-black tracking-wider text-white shadow-sm">LOTTE</span>
+          <div>
+            <h1 className="flex items-center gap-2 text-base font-black tracking-tight text-slate-900">
+              MD Floor-Tetris
+              <span className="rounded-md bg-slate-100 px-2 py-0.5 text-[11px] font-bold text-slate-600">잠실점 B1 평면 CAD</span>
+            </h1>
+            <p className="text-[11px] font-semibold text-slate-400">비정형 다각형 도면 기반 실시간 평효율 시뮬레이터</p>
+          </div>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <KpiCapsule
+            label="층 예상 월 총매출"
+            value={currentMetrics.rev.toFixed(1)}
+            unit="억"
+            delta={deltaRev}
+            deltaUnit="억"
+            digits={1}
+            footnote={`기준 ${initialMetrics.rev.toFixed(1)}억`}
+          />
+          <KpiCapsule
+            label="평균 평효율"
+            value={man(currentMetrics.eff)}
+            unit="만/평"
+            delta={deltaEff}
+            deltaUnit="만"
+            digits={0}
+            footnote={`기준 ${man(initialMetrics.eff)}만`}
+          />
+          <KpiCapsule
+            label="백화점 월 수수료"
+            value={currentMetrics.comm.toFixed(2)}
+            unit="억"
+            delta={deltaComm}
+            deltaUnit="억"
+            digits={2}
+            footnote={`평균 수수료율 ${(currentMetrics.comm / currentMetrics.rev * 100).toFixed(1)}%`}
+          />
+        </div>
+
+        <button
+          type="button"
+          onClick={handleReset}
+          className="flex shrink-0 items-center gap-1.5 rounded-xl border border-slate-300 bg-white px-3 py-2 text-xs font-bold text-slate-600 shadow-sm transition hover:bg-slate-50 active:scale-95"
+        >
+          <Icon name="RotateCcw" size={13} />
+          도면 리셋
+        </button>
+      </header>
+
+      {/* ---------- BODY ---------- */}
+      <div className="flex min-h-0 flex-1 overflow-hidden">
+        {/* 좌: 비정형 SVG 평면도 */}
+        <div className="flex min-w-0 flex-[7] flex-col p-5">
+          <div className="cad-canvas-bg flex min-h-0 flex-1 flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
+            <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/90 px-4 py-2 text-xs font-semibold text-slate-500 backdrop-blur-sm">
+              <div className="flex min-w-0 items-center gap-2">
+                <span className="flex min-w-0 items-center gap-1.5 font-bold text-slate-700">
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${plan ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                  <span className="truncate">{plan ? plan.name : 'LOTTE-JS-B1-ASYMMETRIC.svg'}</span>
+                </span>
+                <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
+                  {plan ? plan.kind : 'BUILT-IN'}
+                </span>
+              </div>
+
+              <div className="flex shrink-0 items-center gap-1.5">
+                <input
+                  ref={fileRef}
+                  type="file"
+                  accept=".dxf,.svg,.pdf,.png,.jpg,.jpeg,image/svg+xml,application/pdf,image/png,image/jpeg"
+                  onChange={handlePickPlan}
+                  className="hidden"
+                  aria-label="도면 파일 선택"
+                />
+                <button
+                  type="button"
+                  onClick={() => fileRef.current && fileRef.current.click()}
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
+                >
+                  <Icon name="Upload" size={12} />
+                  도면 업로드
+                </button>
+
+                <button
+                  type="button"
+                  onClick={() => setShowZones((v) => !v)}
+                  aria-pressed={showZones}
+                  className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition active:scale-95 ${
+                    showZones
+                      ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
+                      : 'border-slate-200 bg-slate-100 text-slate-400 hover:bg-slate-50'
+                  }`}
+                >
+                  <Icon name="Layers" size={12} />
+                  구역 표시
+                </button>
+
+                {analysis ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowTrace((v) => !v)}
+                    aria-pressed={showTrace}
+                    className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition active:scale-95 ${
+                      showTrace
+                        ? 'border-slate-900 bg-slate-900 text-white'
+                        : 'border-slate-200 bg-white text-slate-400 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Icon name="Spline" size={12} />
+                    선 추적
+                  </button>
+                ) : null}
+
+                {analysis && analysis.stats && analysis.stats.regions > 0 ? (
+                  <button
+                    type="button"
+                    onClick={() => setShowRegions((v) => !v)}
+                    aria-pressed={showRegions}
+                    className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition active:scale-95 ${
+                      showRegions
+                        ? 'border-rose-500 bg-rose-50 text-rose-700'
+                        : 'border-slate-200 bg-white text-slate-400 hover:bg-slate-50'
+                    }`}
+                  >
+                    <Icon name="Frame" size={12} />
+                    영역 {analysis.stats.regions}
+                  </button>
+                ) : null}
+
+                {plan ? (
+                  <button
+                    type="button"
+                    onClick={handleClearPlan}
+                    className="flex items-center gap-1.5 rounded-lg border border-slate-200 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-500 transition hover:bg-slate-50 active:scale-95"
+                  >
+                    <Icon name="Undo2" size={12} />
+                    기본 도면
+                  </button>
+                ) : null}
+              </div>
+            </div>
+
+            <div
+              className={`relative flex min-h-0 flex-1 items-center justify-center p-3 transition ${
+                drawHover ? 'bg-rose-50/50 ring-2 ring-inset ring-rose-300' : ''
+              }`}
+              onDragOver={(ev) => {
+                if (ev.dataTransfer.types.includes('Files')) {
+                  ev.preventDefault();
+                  ev.dataTransfer.dropEffect = 'copy';
+                  setDrawHover(true);
+                }
+              }}
+              onDragLeave={(ev) => {
+                if (!ev.currentTarget.contains(ev.relatedTarget)) setDrawHover(false);
+              }}
+              onDrop={(ev) => {
+                const files = ev.dataTransfer.files;
+                if (files && files.length) {
+                  ev.preventDefault();
+                  setDrawHover(false);
+                  loadPlanFile(files[0]);
+                }
+              }}
+            >
+              <FloorPlan
+                zones={zones}
+                hovered={hoveredZoneId}
+                selected={selectedCandidate}
+                onHover={setHoveredZoneId}
+                onApply={handleApply}
+                onLeave={() => setHoveredZoneId(null)}
+                plan={plan}
+                showZones={showZones}
+                analysis={analysis}
+                showTrace={showTrace}
+                showRegions={showRegions}
+              />
+
+              {!plan ? (
+                <div className="pointer-events-none absolute inset-x-0 bottom-3 flex justify-center">
+                  <span className="rounded-full border border-slate-200 bg-white/90 px-3 py-1 text-[10.5px] font-semibold text-slate-400 backdrop-blur-sm">
+                    DXF · SVG · PDF · PNG · JPG 파일을 여기로 끌어다 놓아도 됩니다
+                  </span>
+                </div>
+              ) : null}
+
+              {drawHover ? (
+                <div className="pointer-events-none absolute inset-3 flex items-center justify-center rounded-xl border-2 border-rose-300 bg-white/70 ring-4 ring-rose-200/60">
+                  <span className="text-sm font-black text-rose-600">여기에 놓으면 도면으로 적용됩니다</span>
+                </div>
+              ) : null}
+
+              {parsing ? (
+                <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white/80 backdrop-blur-sm">
+                  <span className="h-7 w-7 animate-spin rounded-full border-[3px] border-slate-200 border-t-rose-500" />
+                  <span className="text-[12px] font-bold text-slate-600">{parsing}</span>
+                </div>
+              ) : null}
+
+              {parseError ? (
+                <div className="absolute inset-x-4 bottom-4 z-10 flex items-start gap-2 rounded-xl border border-rose-200 bg-rose-50 px-3 py-2.5">
+                  <Icon name="AlertCircle" size={14} className="mt-0.5 shrink-0 text-rose-500" />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[11.5px] font-bold text-rose-800">도면을 해석하지 못했습니다</p>
+                    <p className="mt-0.5 text-[10.5px] leading-relaxed text-rose-600">{parseError}</p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={() => setParseError(null)}
+                    aria-label="오류 닫기"
+                    className="shrink-0 rounded p-0.5 text-rose-400 transition hover:bg-rose-100 hover:text-rose-700"
+                  >
+                    <Icon name="X" size={12} stroke={2.6} />
+                  </button>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="flex shrink-0 items-center justify-between border-t border-slate-100 px-5 py-2 text-[10.5px] font-semibold text-slate-400">
+              <div className="flex items-center gap-3.5">
+                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm border border-slate-300 bg-white" />현행</span>
+                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-amber-400" />개편 필요</span>
+                <span className="flex items-center gap-1.5"><span className="h-2 w-2 rounded-sm bg-emerald-500" />신규 교체</span>
+              </div>
+              <div className="flex items-center gap-3 tabular">
+                {analysis && analysis.stats ? (
+                  <span className="rounded bg-slate-100 px-1.5 py-0.5 font-bold text-slate-600">
+                    {analysis.stats.format} · 선 {analysis.stats.lines || analysis.stats.entities}
+                    {analysis.stats.regions ? ` · 영역 ${analysis.stats.regions}` : ''}
+                  </span>
+                ) : null}
+                <span>6개 구역 · {currentMetrics.pyeong}평 · 교체 {replacedZones.length}건</span>
+              </div>
+            </div>
+          </div>
+        </div>
+
+        {/* 우: 후보 브랜드 + 변경 내역 */}
+        <div className="flex min-h-0 w-[30%] min-w-[360px] max-w-[460px] shrink-0 flex-col border-l border-slate-200 bg-white">
+          <div className="flex min-h-0 flex-1 flex-col overflow-hidden p-5">
+            <div className="mb-3 flex shrink-0 items-center justify-between">
+              <h2 className="flex items-center gap-2 text-xs font-black text-slate-900">
+                <span className="h-2 w-2 rounded-full bg-rose-500" />
+                신규 입점 대기 후보 브랜드
+              </h2>
+              <span className="text-[11px] font-bold text-slate-400">{CANDIDATES.length}개 대기</span>
+            </div>
+
+            <div className="custom-scrollbar flex min-h-0 flex-1 flex-col gap-2 overflow-y-auto pr-1">
+              {CANDIDATES.map((brand) => (
+                <CandidateCard
+                  key={brand.id}
+                  brand={brand}
+                  selected={selectedCandidate === brand.id}
+                  usedCount={usedCounts[brand.name] || 0}
+                  onSelect={(id) => setSelectedCandidate((cur) => (cur === id ? null : id))}
+                  onDragStart={() => setSelectedCandidate(null)}
+                />
+              ))}
+            </div>
+          </div>
+
+          <div className="shrink-0 border-t border-slate-200 bg-slate-50/60 p-5">
+            <h3 className="mb-2 flex items-center justify-between text-[11px] font-black uppercase tracking-wider text-slate-700">
+              <span>MD 개편 변경 내역</span>
+              <span className="font-semibold text-slate-400">{replacedZones.length}개 교체</span>
+            </h3>
+
+            {replacedZones.length === 0 ? (
+              <div className="rounded-xl border border-slate-200 bg-white py-5 text-center">
+                <p className="text-xs font-semibold text-slate-500">교체된 구역이 없습니다</p>
+                <p className="mt-1 text-[10.5px] leading-relaxed text-slate-400">도면에 후보 브랜드를 드롭하거나<br />매장을 클릭해 적용하세요</p>
+              </div>
+            ) : (
+              <div className="custom-scrollbar max-h-[150px] space-y-1.5 overflow-y-auto">
+                {replacedZones.map((z) => {
+                  const base = ZONES_BASE.find((b) => b.id === z.id);
+                  const before = (z.area * base.currentBrand.pyeongEfficiency) / 10000;
+                  const after = (z.area * z.currentBrand.pyeongEfficiency) / 10000;
+                  const diff = after - before;
+                  return (
+                    <div key={z.id} className="flex items-center justify-between gap-2 rounded-lg border border-slate-200 bg-white p-2 shadow-sm">
+                      <div className="min-w-0">
+                        <p className="truncate text-[11px] font-extrabold text-slate-800">
+                          {z.id} <span className="font-semibold text-slate-400">({z.area}평)</span>
+                          <span className="mx-1 text-slate-300">→</span>
+                          <span className="text-emerald-700">{z.currentBrand.name}</span>
+                        </p>
+                        <p className="text-[10px] font-medium tabular text-slate-400">
+                          {before.toFixed(2)}억 → {after.toFixed(2)}억
+                        </p>
+                      </div>
+                      <div className="flex shrink-0 items-center gap-1.5">
+                        <span className={`text-[11px] font-black tabular ${diff >= 0 ? 'text-emerald-600' : 'text-rose-600'}`}>
+                          {signed(diff, 2)}억
+                        </span>
+                        <button
+                          type="button"
+                          onClick={() => handleRevert(z.id)}
+                          aria-label={`${z.id} 원래 브랜드로 되돌리기`}
+                          className="flex h-5 w-5 items-center justify-center rounded-full text-slate-300 transition hover:bg-slate-100 hover:text-slate-600"
+                        >
+                          <Icon name="X" size={11} stroke={2.6} />
+                        </button>
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            )}
+          </div>
+        </div>
+      </div>
+
+      {toast ? (
+        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift">
+          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white">
+            <Icon name="Check" size={10} stroke={3} />
+          </span>
+          <span className="text-[12px] font-semibold tracking-tight text-slate-700">{toast}</span>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App />);
+</script>
+</body>
+</html>
