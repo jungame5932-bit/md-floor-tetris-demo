@@ -945,25 +945,53 @@ window.PlanParser = (function () {
    * 브라우저에서 그대로 수행한다. 백엔드와 같은 임계값을 쓴다.
    * ============================================================ */
 
-  var AUTO_MIN_AREA_RATIO = 0.002;
+  // 전체 면적 대비 구획 최소 면적. 0.02% 는 작은 매장 칸까지 잡고,
+  // 아이콘·글자 조각은 색상 버킷 단계에서 이미 걸러진다.
+  var AUTO_MIN_AREA_RATIO = 0.0008;
   var AUTO_MAX_AREA_RATIO = 0.85;
   var AUTO_MAX_ZONES = 80;
   // 지시서 Step 1-3: 0.02 → 0.005 로 정밀도 상향 (곡선·미세 꺾임 보존)
   var AUTO_APPROX_EPS = 0.005;
   var AUTO_APPROX_EPS_FLOOR = 0.8;
-  var AUTO_FRAG_MIN_RATIO = 0.0002;
-  var AUTO_FRAG_MAX_GAP = 8;
   var AUTO_MAX_POINTS = 48;
+  // 색상 버킷: Hue 를 30도 단위로 나누고, 점유율 4% 이상 버킷만 쓴다
+  var AUTO_HUE_BUCKETS = 12;
+  var AUTO_HUE_MIN_SHARE = 0.04;
+  var AUTO_CELL_MIN_SIDE = 10;
 
   // 8-이웃 오프셋 (동 → 시계방향)
   var NB_X = [1, 1, 0, -1, -1, -1, 0, 1];
   var NB_Y = [0, 1, 1, 1, 0, -1, -1, -1];
 
   /** 채도·명도 기준 색 채움 마스크. 배경 흰색과 진회색 글자를 뺀다. */
-  function colorMaskOf(imgData) {
+  /** RGB → Hue(0~360). 무채색이면 -1. */
+  function hueOf(r, g, b) {
+    var mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
+    var mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
+    var d = mx - mn;
+    if (d === 0) return -1;
+    var hh;
+    if (mx === r) hh = 60 * (((g - b) / d) % 6);
+    else if (mx === g) hh = 60 * ((b - r) / d + 2);
+    else hh = 60 * ((r - g) / d + 4);
+    if (hh < 0) hh += 360;
+    return hh;
+  }
+
+  /**
+   * 채색 픽셀을 Hue 버킷으로 나눈다.
+   *
+   * 채도만으로 하나의 마스크를 만들면 같은 색이 맞닿은 이웃 칸이 한 덩어리로
+   * 합쳐진다. 색상 30도 단위로 쪼개면 주황 칸과 분홍 칸이 서로 붙지 않는다.
+   * 점유율이 낮은 버킷은 아이콘·장식이라 버린다.
+   */
+  function colorBuckets(imgData) {
     var W = imgData.width, H = imgData.height, d = imgData.data;
-    var mask = new Uint8Array(W * H);
-    for (var i = 0, j = 0; j < W * H; i += 4, j++) {
+    var n = W * H;
+    var hue = new Int16Array(n);
+    var hist = new Float64Array(AUTO_HUE_BUCKETS);
+    var painted = 0;
+    for (var i = 0, j = 0; j < n; i += 4, j++) {
       var a = d[i + 3] / 255;
       var r = d[i] * a + 255 * (1 - a);
       var g = d[i + 1] * a + 255 * (1 - a);
@@ -971,10 +999,24 @@ window.PlanParser = (function () {
       var mx = r > g ? (r > b ? r : b) : (g > b ? g : b);
       var mn = r < g ? (r < b ? r : b) : (g < b ? g : b);
       var sat = mx <= 0 ? 0 : ((mx - mn) / mx) * 255;
-      mask[j] = sat > 20 && mx > 120 ? 1 : 0;
+      if (sat > 20 && mx > 120) {
+        var hh = hueOf(r, g, b);
+        var bi = hh < 0 ? -1 : Math.floor(hh / (360 / AUTO_HUE_BUCKETS)) % AUTO_HUE_BUCKETS;
+        hue[j] = bi;
+        if (bi >= 0) { hist[bi] += 1; painted += 1; }
+      } else {
+        hue[j] = -1;
+      }
     }
-    return mask;
+    var total = painted || 1;
+    var active = [];
+    for (var k = 0; k < AUTO_HUE_BUCKETS; k++) {
+      if (hist[k] / total >= AUTO_HUE_MIN_SHARE) active.push(k);
+    }
+    return { hue: hue, active: active, painted: painted };
   }
+
+
 
   /** 3x3 사각 커널 침식/팽창. OpenCV 경계 처리를 따라 바깥은 침식하지 않는다. */
   function morph3(mask, W, H, dilate) {
@@ -1148,84 +1190,35 @@ window.PlanParser = (function () {
   }
 
   /** 텍스트·기호로 끊긴 작은 파편을 가장 가까운 큰 구획에 흡수시킨다. */
-  function absorbFragments(mask, W, H, found, imgArea) {
-    var out = mask;
-    var labels = found.labels;
-    var minArea = imgArea * AUTO_MIN_AREA_RATIO;
-    var maxArea = imgArea * AUTO_MAX_AREA_RATIO;
-    var fragMin = imgArea * AUTO_FRAG_MIN_RATIO;
-    var kept = [], frags = [];
-    for (var i = 0; i < found.comps.length; i++) {
-      var c = found.comps[i];
-      if (c.area >= minArea && c.area <= maxArea && c.bbox.w >= 10 && c.bbox.h >= 8) {
-        kept.push(c);
-      } else if (c.area >= fragMin && c.area < minArea) {
-        frags.push(c);
-      }
-    }
-    if (!kept.length || !frags.length) return out;
 
-    var absorbed = 0;
-    for (var f = 0; f < frags.length; f++) {
-      var fc = frags[f];
-      var best = null, bestGap = Infinity;
-      for (var k = 0; k < kept.length; k++) {
-        var gap = bboxGap(fc.bbox, kept[k].bbox);
-        if (gap <= AUTO_FRAG_MAX_GAP && gap < bestGap) { bestGap = gap; best = kept[k]; }
-      }
-      if (!best) continue;
-      var b = fc.bbox;
-      for (var y = b.y; y < b.y + b.h; y++) {
-        for (var x = b.x; x < b.x + b.w; x++) {
-          var idx = y * W + x;
-          if (labels[idx] === fc.label) { labels[idx] = best.label; out[idx] = 1; }
-        }
-      }
-      absorbed += 1;
-    }
-    return out;
-  }
 
   /**
    * ImageData → 구획 JSON.
    * 백엔드 /api/upload-floorplan 응답과 같은 모양으로 돌려준다.
    */
-  function detectRasterZones(imgData) {
-    var W = imgData.width, H = imgData.height;
-    var imgArea = W * H;
-    var mask = colorMaskOf(imgData);
-    mask = morph3(mask, W, H, false); // erode
-    mask = morph3(mask, W, H, true);  // dilate
-
-    // 1) 컴포넌트 내부 구멍 메우기 (텍스트·아이콘으로 뚫린 빈 칸)
-    var holeFound = componentLabels(mask, W, H);
-    mask = fillComponentHoles(mask, W, H, holeFound);
-
-    // 2) 끊긴 파편을 가까운 구획에 흡수
-    var fragFound = componentLabels(mask, W, H);
-    mask = absorbFragments(mask, W, H, fragFound, imgArea);
-
-    // 3) 최종 컴포넌트
+  /** 마스크 하나 → 구획 목록 (외곽선 추적 + 다각형 단순화) */
+  function zonesFromMask(mask, W, H, imgArea) {
     var found = componentLabels(mask, W, H);
     var labels = found.labels;
     var minArea = imgArea * AUTO_MIN_AREA_RATIO;
     var maxArea = imgArea * AUTO_MAX_AREA_RATIO;
-
+    var minSide = AUTO_CELL_MIN_SIDE;
     var zones = [];
+
     for (var i = 0; i < found.comps.length; i++) {
       var comp = found.comps[i];
       var box = comp.bbox;
       if (comp.area < minArea || comp.area > maxArea) continue;
-      if (box.w < 10 || box.h < 8) continue;
+      if (box.w < minSide || box.h < minSide) continue;
 
       // 요소만 잘라낸 작은 이진 이미지에서 외곽선을 따라간다
       var bw = box.w + 2, bh = box.h + 2;
       var bin = new Uint8Array(bw * bh);
       for (var y = 0; y < box.h; y++) {
-        var src = (box.y + y) * W + box.x;
-        var dst = (y + 1) * bw + 1;
+        var srow = (box.y + y) * W + box.x;
+        var drow = (y + 1) * bw + 1;
         for (var x = 0; x < box.w; x++) {
-          if (labels[src + x] === comp.label) bin[dst + x] = 1;
+          if (labels[srow + x] === comp.label) bin[drow + x] = 1;
         }
       }
 
@@ -1243,7 +1236,6 @@ window.PlanParser = (function () {
       var per = perimeterOf(outline);
       var eps = Math.max(AUTO_APPROX_EPS_FLOOR, AUTO_APPROX_EPS * per);
       var simple = rdp(outline, eps);
-      // 점이 너무 많으면 단계적으로 성기게 만든다 (라벨·렌더 부담 억제)
       var relax = 1;
       while (simple.length > AUTO_MAX_POINTS && relax < 8) {
         relax += 1;
@@ -1257,9 +1249,39 @@ window.PlanParser = (function () {
       if (!(polyArea(pts) > 0)) continue;
       zones.push({ pts: pts, area: comp.area, bbox: box });
     }
+    return zones;
+  }
 
-    // 같은 구획이 채움·테두리로 두 번 잡히면 하나만 남긴다
-    zones.sort(function (a, b) { return b.area - a.area; });
+  /**
+   * ImageData → 구획 JSON.
+   * 백엔드 /api/upload-floorplan 응답과 같은 모양으로 돌려준다.
+   */
+  function detectRasterZones(imgData) {
+    var W = imgData.width, H = imgData.height;
+    var imgArea = W * H;
+    var n = W * H;
+    var cb = colorBuckets(imgData);
+
+    var zones = [];
+    for (var b = 0; b < cb.active.length; b++) {
+      var bucket = cb.active[b];
+      var m = new Uint8Array(n);
+      var count = 0;
+      for (var p = 0; p < n; p++) {
+        if (cb.hue[p] === bucket) { m[p] = 1; count += 1; }
+      }
+      if (!count) continue;
+
+      m = morph3(m, W, H, false); // erode
+      m = morph3(m, W, H, true);  // dilate
+      m = fillComponentHoles(m, W, H, componentLabels(m, W, H));
+
+      var part = zonesFromMask(m, W, H, imgArea);
+      for (var q = 0; q < part.length; q++) zones.push(part[q]);
+    }
+
+    // 같은 구획이 두 번 잡히면 하나만 남긴다
+    zones.sort(function (a, b2) { return b2.area - a.area; });
     var kept = [];
     for (var z = 0; z < zones.length; z++) {
       var dup = false;
@@ -1270,9 +1292,9 @@ window.PlanParser = (function () {
     }
 
     // 위→아래, 좌→우 순으로 번호를 매긴다
-    kept.sort(function (a, b) {
-      var ra = Math.floor(a.bbox.y / 24), rb = Math.floor(b.bbox.y / 24);
-      return ra !== rb ? ra - rb : a.bbox.x - b.bbox.x;
+    kept.sort(function (a, b2) {
+      var ra = Math.floor(a.bbox.y / 24), rb = Math.floor(b2.bbox.y / 24);
+      return ra !== rb ? ra - rb : a.bbox.x - b2.bbox.x;
     });
     kept = kept.slice(0, AUTO_MAX_ZONES);
 
@@ -1291,6 +1313,7 @@ window.PlanParser = (function () {
       }),
     };
   }
+
 
   return {
     parseDxf: parseDxf,
@@ -1703,7 +1726,7 @@ function zonesFromRegions(regions, brandPool, totalPyeong) {
   // 벽·기둥 같은 잔휘 조각을 걸러내고 큰 구획만 쓴다
   const list0 = regions
     .filter((r) => r && r.pts && r.pts.length >= 3 && r.area > 0)
-    .slice(0, 40);
+    .slice(0, 120);
   if (!list0.length) return null;
 
   // 도면 전체를 덮는 배경/외벽 사각형은 구획이 아니다
@@ -1722,7 +1745,7 @@ function zonesFromRegions(regions, brandPool, totalPyeong) {
     const share = r.area / areaSumAll;
     // 도면의 65% 이상을 덮거나, 전체의 60% 이상 면적이면 배경/외벽으로 본다
     return cover < 0.65 && share < 0.6;
-  }).slice(0, 30);
+  }).slice(0, 120);
   if (!list.length) return null;
 
   const total = totalPyeong || PLAN_TOTAL_PYEONG;
