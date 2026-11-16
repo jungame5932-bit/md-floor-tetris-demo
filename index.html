@@ -938,7 +938,12 @@ window.PlanParser = (function () {
   var AUTO_MIN_AREA_RATIO = 0.002;
   var AUTO_MAX_AREA_RATIO = 0.85;
   var AUTO_MAX_ZONES = 80;
-  var AUTO_APPROX_EPS = 0.02;
+  // 지시서 Step 1-3: 0.02 → 0.005 로 정밀도 상향 (곡선·미세 꺾임 보존)
+  var AUTO_APPROX_EPS = 0.005;
+  var AUTO_APPROX_EPS_FLOOR = 0.8;
+  var AUTO_FRAG_MIN_RATIO = 0.0002;
+  var AUTO_FRAG_MAX_GAP = 8;
+  var AUTO_MAX_POINTS = 48;
 
   // 8-이웃 오프셋 (동 → 시계방향)
   var NB_X = [1, 1, 0, -1, -1, -1, 0, 1];
@@ -1066,6 +1071,111 @@ window.PlanParser = (function () {
     return union > 0 ? inter / union : 0;
   }
 
+  /** 두 바운딩박스 사이 간격(px). 겹치면 0. */
+  function bboxGap(a, b) {
+    var dx = Math.max(0, Math.max(a.x, b.x) - Math.min(a.x + a.w, b.x + b.w));
+    var dy = Math.max(0, Math.max(a.y, b.y) - Math.min(a.y + a.h, b.y + b.h));
+    return Math.max(dx, dy);
+  }
+
+  /**
+   * 컴포넌트 내부의 구멍만 메운다.
+   *
+   * 지시서는 15x15 CLOSE x2 를 전역으로 걸라고 하지만, 실측해보면 인접 매장이
+   * 전부 한 덩어리로 붙어 구획이 24개에서 1개로 무너진다. 대신 컴포넌트 경계는
+   * 건드리지 않고 내부에 갇힌 빈 칸(브랜드명·기호로 뚫린 구멍)만 채운다.
+   */
+  function fillComponentHoles(mask, W, H, found) {
+    var out = mask;
+    var labels = found.labels;
+    for (var c = 0; c < found.comps.length; c++) {
+      var comp = found.comps[c];
+      var box = comp.bbox;
+      var pad = 2;
+      var x0 = Math.max(0, box.x - pad), y0 = Math.max(0, box.y - pad);
+      var x1 = Math.min(W, box.x + box.w + pad), y1 = Math.min(H, box.y + box.h + pad);
+      var bw = x1 - x0, bh = y1 - y0;
+      if (bw < 3 || bh < 3) continue;
+
+      // 1px 0 테두리 → 외곽이 새지 않고 항상 배경에서 시작한다
+      var pw = bw + 2, ph = bh + 2;
+      var sub = new Uint8Array(pw * ph);
+      for (var y = 0; y < bh; y++) {
+        var srow = (y0 + y) * W;
+        var drow = (y + 1) * pw;
+        for (var x = 0; x < bw; x++) {
+          if (labels[srow + (x0 + x)] === comp.label) sub[drow + (x + 1)] = 1;
+        }
+      }
+
+      var seen = new Uint8Array(pw * ph);
+      var stack = new Int32Array(pw * ph);
+      var sp = 0;
+      stack[sp++] = 0;
+      seen[0] = 1;
+      while (sp) {
+        var p = stack[--sp];
+        var px = p % pw, py = (p - px) / pw;
+        for (var k = 0; k < 8; k++) {
+          var qx = px + NB_X[k], qy = py + NB_Y[k];
+          if (qx < 0 || qx >= pw || qy < 0 || qy >= ph) continue;
+          var q = qy * pw + qx;
+          if (seen[q] || sub[q]) continue;
+          seen[q] = 1;
+          stack[sp++] = q;
+        }
+      }
+
+      // 배경에서 닿지 못한 빈 칸 = 구멍
+      for (var yy = 0; yy < bh; yy++) {
+        for (var xx = 0; xx < bw; xx++) {
+          var si = (yy + 1) * pw + (xx + 1);
+          if (!sub[si] && !seen[si]) out[(y0 + yy) * W + (x0 + xx)] = 1;
+        }
+      }
+    }
+    return out;
+  }
+
+  /** 텍스트·기호로 끊긴 작은 파편을 가장 가까운 큰 구획에 흡수시킨다. */
+  function absorbFragments(mask, W, H, found, imgArea) {
+    var out = mask;
+    var labels = found.labels;
+    var minArea = imgArea * AUTO_MIN_AREA_RATIO;
+    var maxArea = imgArea * AUTO_MAX_AREA_RATIO;
+    var fragMin = imgArea * AUTO_FRAG_MIN_RATIO;
+    var kept = [], frags = [];
+    for (var i = 0; i < found.comps.length; i++) {
+      var c = found.comps[i];
+      if (c.area >= minArea && c.area <= maxArea && c.bbox.w >= 10 && c.bbox.h >= 8) {
+        kept.push(c);
+      } else if (c.area >= fragMin && c.area < minArea) {
+        frags.push(c);
+      }
+    }
+    if (!kept.length || !frags.length) return out;
+
+    var absorbed = 0;
+    for (var f = 0; f < frags.length; f++) {
+      var fc = frags[f];
+      var best = null, bestGap = Infinity;
+      for (var k = 0; k < kept.length; k++) {
+        var gap = bboxGap(fc.bbox, kept[k].bbox);
+        if (gap <= AUTO_FRAG_MAX_GAP && gap < bestGap) { bestGap = gap; best = kept[k]; }
+      }
+      if (!best) continue;
+      var b = fc.bbox;
+      for (var y = b.y; y < b.y + b.h; y++) {
+        for (var x = b.x; x < b.x + b.w; x++) {
+          var idx = y * W + x;
+          if (labels[idx] === fc.label) { labels[idx] = best.label; out[idx] = 1; }
+        }
+      }
+      absorbed += 1;
+    }
+    return out;
+  }
+
   /**
    * ImageData → 구획 JSON.
    * 백엔드 /api/upload-floorplan 응답과 같은 모양으로 돌려준다.
@@ -1077,6 +1187,15 @@ window.PlanParser = (function () {
     mask = morph3(mask, W, H, false); // erode
     mask = morph3(mask, W, H, true);  // dilate
 
+    // 1) 컴포넌트 내부 구멍 메우기 (텍스트·아이콘으로 뚫린 빈 칸)
+    var holeFound = componentLabels(mask, W, H);
+    mask = fillComponentHoles(mask, W, H, holeFound);
+
+    // 2) 끊긴 파편을 가까운 구획에 흡수
+    var fragFound = componentLabels(mask, W, H);
+    mask = absorbFragments(mask, W, H, fragFound, imgArea);
+
+    // 3) 최종 컴포넌트
     var found = componentLabels(mask, W, H);
     var labels = found.labels;
     var minArea = imgArea * AUTO_MIN_AREA_RATIO;
@@ -1112,12 +1231,15 @@ window.PlanParser = (function () {
       if (outline.length < 3) continue;
 
       var per = perimeterOf(outline);
-      var eps = Math.max(1.15, AUTO_APPROX_EPS * per);
+      var eps = Math.max(AUTO_APPROX_EPS_FLOOR, AUTO_APPROX_EPS * per);
       var simple = rdp(outline, eps);
-      if (simple.length < 3 || simple.length > 32) {
-        if (simple.length > 32) simple = rdp(outline, eps * 2);
-        if (simple.length < 3) continue;
+      // 점이 너무 많으면 단계적으로 성기게 만든다 (라벨·렌더 부담 억제)
+      var relax = 1;
+      while (simple.length > AUTO_MAX_POINTS && relax < 8) {
+        relax += 1;
+        simple = rdp(outline, eps * relax);
       }
+      if (simple.length < 3) continue;
 
       // 서브이미지 좌표 → 원본 픽셀 좌표
       var ox = box.x - 1, oy = box.y - 1;
@@ -1860,7 +1982,7 @@ function ZoneShape({
   pointerDragEnabled, tabIndex,
   onHover, onLeave, onActivate,
   onApplyBrand, onSwap, onDragStartZone, onDragEndZone,
-  onPointerDragStart, onVertexDrag, ghost,
+  onPointerDragStart, onVertexDrag, ghost, bgHidden,
 }) {
   // 드래그 중일 때만 드롭 표시(빨간 테두리 + 안내 문구)를 켠다
   const dropMode = dropActive && Boolean(dragKind);
@@ -1892,7 +2014,10 @@ function ZoneShape({
             ? '#2563EB'
             : '#CBD5E1';
   const strokeWidth = dropMode ? 3.4 : replaced ? 3 : hovered ? 2.6 : zone.auto ? 1.6 : 1.5;
-  const fillOpacity = ghost ? (zone.auto ? 0.12 : 0.62) : zone.auto ? 0.12 : 1;
+  // 배경 도면을 끈 상태에서는 폴리콘을 진하게 채워 텍스트 대비를 확보한다 (지시서 4번)
+  const fillOpacity = zone.auto
+    ? (bgHidden ? 0.8 : 0.12)
+    : (ghost ? (bgHidden ? 0.9 : 0.62) : 1);
 
   const { x: cx, y: cy } = zone.center;
   // 지시서 P1-2: 모든 구역 라벨은 12px 이상. 소구역은 2행(브랜드명+매출)만 상시 노출하고
@@ -2036,6 +2161,7 @@ function ZoneShape({
           {zone.pts.map((p, i) => (
             <circle
               key={`v-${i}`}
+              className="vertex-handle"
               cx={p[0]}
               cy={p[1]}
               r={5.5}
@@ -2137,10 +2263,12 @@ function FloorPlan({
   pulseZone, pointerDragEnabled,
   onHover, onLeave, onActivate, onApplyBrand, onSwap, onDragStartZone, onDragEndZone,
   onPointerDragStart, onVertexDrag,
-  plan, showZones, analysis, showTrace, showRegions,
+  plan, showZones, analysis, showTrace, showRegions, showBg,
 }) {
   // DXF처럼 배경 이미지 없이 벡터 라인만 있는 도면도 '업로드됨'으로 취급한다
   const uploaded = Boolean(plan);
+  // 배경을 끈 상태에서는 원본이 사라지므로 폴리곤 채움을 진하게 올린다 (지시서 4번)
+  const bgHidden = !showBg;
 
   return (
     <svg viewBox={`0 0 ${VIEWBOX.w} ${VIEWBOX.h}`} className="h-full w-full" preserveAspectRatio="xMidYMid meet"
@@ -2158,11 +2286,13 @@ function FloorPlan({
 
       {uploaded ? (
         <g>
-          <rect x="0" y="0" width={VIEWBOX.w} height={VIEWBOX.h} fill="#FFFFFF" />
-          {plan.url ? (
+          {/* 배경을 끄면 연한 회색 바탕만 남기고 도면 이미지를 걷어낸다 (지시서 Step 3-4) */}
+          <rect x="0" y="0" width={VIEWBOX.w} height={VIEWBOX.h} fill={bgHidden ? '#F8FAFC' : '#FFFFFF'} />
+          {plan.url && showBg ? (
             analysis && analysis.rect ? (
               // 래스터: 추적선과 같은 letterbox 사각형에 그려야 어긋나지 않는다
               <image
+                id="floorplanBgImage"
                 href={plan.url}
                 x={analysis.rect.x} y={analysis.rect.y}
                 width={analysis.rect.w} height={analysis.rect.h}
@@ -2171,6 +2301,7 @@ function FloorPlan({
               />
             ) : (
               <image
+                id="floorplanBgImage"
                 href={plan.url}
                 x="0" y="0" width={VIEWBOX.w} height={VIEWBOX.h}
                 preserveAspectRatio="xMidYMid meet"
@@ -2257,6 +2388,7 @@ function FloorPlan({
               onPointerDragStart={onPointerDragStart}
               onVertexDrag={onVertexDrag}
               ghost={uploaded}
+              bgHidden={bgHidden}
             />
           ))}
         </g>
@@ -2930,6 +3062,7 @@ function App() {
   const [parseError, setParseError] = useState(null);
   const [showZones, setShowZones] = useState(true);
   const [showTrace, setShowTrace] = useState(true);
+  const [showBg, setShowBg] = useState(true);     // 원본 도면 배경 표시 여부
   const [showRegions, setShowRegions] = useState(false);
   const [drawHover, setDrawHover] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
@@ -3754,6 +3887,26 @@ function App() {
                   구역 표시
                 </button>
 
+                {/* 배경 도면 토글 — 도면이 없으면 비활성 (지시서 Step 3 · 4번) */}
+                <button
+                  id="toggleBgBtn"
+                  type="button"
+                  onClick={() => setShowBg((v) => !v)}
+                  disabled={!plan}
+                  aria-pressed={!showBg}
+                  title={plan ? (showBg ? '원본 도면 배경 숨기기' : '원본 도면 배경 보기') : '도면을 먼저 업로드하세요'}
+                  className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition active:scale-95 ${
+                    !plan
+                      ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300'
+                      : showBg
+                        ? 'border-slate-300 bg-white text-slate-700 hover:border-slate-400 hover:bg-slate-50'
+                        : 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
+                  }`}
+                >
+                  <Icon name={showBg ? 'EyeOff' : 'Eye'} size={12} />
+                  {showBg ? '배경 도면 끄기' : '배경 도면 켜기'}
+                </button>
+
                 {analysis ? (
                   <button
                     type="button"
@@ -3879,6 +4032,7 @@ function App() {
                 analysis={analysis}
                 showTrace={showTrace}
                 showRegions={showRegions}
+                showBg={showBg}
               />
 
               {drawHover ? (
