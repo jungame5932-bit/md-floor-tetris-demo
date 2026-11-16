@@ -108,9 +108,13 @@
   .zone-shape { transition: fill .16s ease, stroke .16s ease, stroke-width .16s ease; }
   .cand-card { transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
   .cand-card:hover { border-color: #94A3B8; }
-  /* P1-3: 포커스는 롯데 레드 아웃라인으로 통일 */
-  *:focus-visible { outline: 2px solid #E60012; outline-offset: 2px; }
-  .zone-group:focus-visible { outline: none; }
+  /* P1-3: 포커스는 롯데 레드 아웃라인으로 통일. Tailwind 의 outline-none 이 나중에 주입되므로 !important 로 이긴다. */
+  *:focus-visible { outline: 2px solid #E60012 !important; outline-offset: 2px; }
+  /* 코드로 focus() 를 옮긴 경우에도 링이 보이게 한다 — 지시서: 매 정지점에서 포커스 링 표시 */
+  .cand-card:focus { outline: 2px solid #E60012 !important; outline-offset: 2px; }
+  .zone-group:focus { outline: none !important; }
+  .zone-group:focus .zone-shape { stroke: #E60012; stroke-width: 3; }
+  .zone-group:focus-visible { outline: none !important; }
   .zone-group:focus-visible .zone-shape { stroke: #E60012; stroke-width: 3; }
 </style>
 </head>
@@ -1001,7 +1005,8 @@ const ZONES_BASE = [
     isReplaced: false,
     // 유선형 조약돌(Pebble) — 하단을 8px 올려 Z-06과 부딪히지 않게 함
     path: 'M 640,320 C 720,290 760,350 720,390 C 660,420 610,360 640,320 Z',
-    center: { x: 675, y: 355 },
+    // 라벨 기준점은 path bbox 중심(631~735.7)에 맞춘다 — 어긋나면 좁은 구역에서 글자가 왼쪽으로 삐진다
+    center: { x: 683.4, y: 355 },
     labelWidth: 118,
   },
   {
@@ -1196,6 +1201,58 @@ function brandForZone(cand, area) {
 
 const PLAN_TOTAL_PYEONG = 200;
 
+/** 도면 자동 인식 백엔드. 빈 값이면 같은 오리진의 /api 를 쓴다(Pages Functions/프록시). */
+const VISION_API_BASE = (() => {
+  if (typeof window === 'undefined') return '';
+  const configured = window.__VISION_API_BASE__;
+  if (typeof configured === 'string') return configured;
+  return '';
+})();
+
+/** 구획 자동 인식이 가능한 형식인지 */
+function isRasterPlan(file) {
+  const ext = ((file && file.name) || '').match(/\.([a-z0-9]+)$/i);
+  const kind = ext ? ext[1].toLowerCase() : '';
+  if (kind === 'jpg' || kind === 'jpeg' || kind === 'png') return true;
+  return /^image\/(jpeg|png)$/i.test((file && file.type) || '');
+}
+
+/**
+ * 백엔드 /api/upload-floorplan 호출.
+ * - 정상: { imageWidth, imageHeight, zones: [...] }
+ * - 백엔드가 없거나 실패: null 을 돌려주고 클라이언트 추적으로 폴백한다
+ */
+async function requestVisionZones(file) {
+  const url = `${VISION_API_BASE}/api/upload-floorplan`;
+  const form = new FormData();
+  form.append('file', file, file.name);
+  let response;
+  try {
+    response = await fetch(url, { method: 'POST', body: form });
+  } catch (err) {
+    return { ok: false, reason: 'unreachable', detail: String((err && err.message) || err) };
+  }
+  if (!response.ok) {
+    let detail = `HTTP ${response.status}`;
+    try {
+      const body = await response.json();
+      if (body && body.detail) detail = String(body.detail);
+    } catch (err) {
+      /* JSON 이 아니면 상태코드만 남긴다 */
+    }
+    return { ok: false, reason: 'http', detail };
+  }
+  try {
+    const body = await response.json();
+    if (!body || !Array.isArray(body.zones)) {
+      return { ok: false, reason: 'shape', detail: 'zones 배열이 없습니다' };
+    }
+    return { ok: true, data: body };
+  } catch (err) {
+    return { ok: false, reason: 'json', detail: String((err && err.message) || err) };
+  }
+}
+
 /** 다각형 무게중심 (면적 가중) — 라벨을 도형 가운데에 놓기 위함 */
 function centroidOf(pts) {
   let a = 0, cx = 0, cy = 0;
@@ -1218,6 +1275,72 @@ function centroidOf(pts) {
 function pathFromPts(pts) {
   const r = (v) => Math.round(v * 100) / 100;
   return 'M ' + pts.map((p) => `${r(p[0])},${r(p[1])}`).join(' L ') + ' Z';
+}
+
+/** 다각형 면적 — 에지 튜닝 후 크기를 다시 재야 한다 */
+function polygonArea(pts) {
+  let a = 0;
+  for (let i = 0, n = pts.length; i < n; i++) {
+    const p = pts[i];
+    const q = pts[(i + 1) % n];
+    a += p[0] * q[1] - q[0] * p[1];
+  }
+  return Math.abs(a) / 2;
+}
+
+/** 꼭짓점 배열로부터 bbox·라벨 크기를 다시 계산한다 */
+function geometryOfPts(pts) {
+  const xs = pts.map((p) => p[0]);
+  const ys = pts.map((p) => p[1]);
+  const x0 = Math.min(...xs);
+  const y0 = Math.min(...ys);
+  const w = Math.max(...xs) - x0;
+  const h = Math.max(...ys) - y0;
+  return {
+    bbox: { x: x0, y: y0, w, h },
+    center: { x: x0 + w / 2, y: y0 + h / 2 },
+    labelWidth: Math.max(28, Math.min(w * 0.94, 240)),
+    labelHeight: Math.max(0, h * 0.92),
+  };
+}
+
+/**
+ * 자동 인식 결과(픽셀 좌표 폴리곤)를 도면 좌표계(VIEWBOX)로 옮긴다.
+ * 비율 보정은 백엔드가 준 원본 해상도로 계산해서 도면이 찌그러지지 않게 한다.
+ */
+function visionZonesToRegions(data) {
+  if (!data || !Array.isArray(data.zones) || !data.zones.length) return null;
+  const srcW = Number(data.imageWidth) || 1;
+  const srcH = Number(data.imageHeight) || 1;
+  // 원본 비율을 유지하면서 VIEWBOX 안에 맞춘다 (letterbox)
+  const scale = Math.min(VIEWBOX.w / srcW, VIEWBOX.h / srcH);
+  const offsetX = (VIEWBOX.w - srcW * scale) / 2;
+  const offsetY = (VIEWBOX.h - srcH * scale) / 2;
+  const rect = { x: offsetX, y: offsetY, w: srcW * scale, h: srcH * scale };
+
+  const regions = data.zones
+    .map((zone) => {
+      const pts = (zone.polygonPoints || [])
+        .filter((p) => Array.isArray(p) && p.length >= 2)
+        .map((p) => [Number(p[0]) * scale + offsetX, Number(p[1]) * scale + offsetY])
+        .filter((p) => Number.isFinite(p[0]) && Number.isFinite(p[1]));
+      const box = Array.isArray(zone.bbox) ? zone.bbox : [0, 0, 0, 0];
+      return {
+        pts,
+        area: Number(zone.estimatedArea) || 0,
+        bbox: {
+          x: Number(box[0]) * scale + offsetX,
+          y: Number(box[1]) * scale + offsetY,
+          w: Number(box[2]) * scale,
+          h: Number(box[3]) * scale,
+        },
+        zoneId: zone.zoneId,
+      };
+    })
+    .filter((r) => r.pts.length >= 3 && r.area > 0);
+
+  if (!regions.length) return null;
+  return { regions, rect };
 }
 
 /** 브랜드를 주어진 평수에 맞춰 배치 — 평효율은 유지하고 매출만 다시 계산 */
@@ -1258,7 +1381,7 @@ function zonesFromRegions(regions, brandPool, totalPyeong) {
   // 벽·기둥 같은 잔휘 조각을 걸러내고 큰 구획만 쓴다
   const list0 = regions
     .filter((r) => r && r.pts && r.pts.length >= 3 && r.area > 0)
-    .slice(0, 16);
+    .slice(0, 40);
   if (!list0.length) return null;
 
   // 도면 전체를 덮는 배경/외벽 사각형은 구획이 아니다
@@ -1277,7 +1400,7 @@ function zonesFromRegions(regions, brandPool, totalPyeong) {
     const share = r.area / areaSumAll;
     // 도면의 65% 이상을 덮거나, 전체의 60% 이상 면적이면 배경/외벽으로 본다
     return cover < 0.65 && share < 0.6;
-  }).slice(0, 12);
+  }).slice(0, 30);
   if (!list.length) return null;
 
   const total = totalPyeong || PLAN_TOTAL_PYEONG;
@@ -1291,8 +1414,14 @@ function zonesFromRegions(regions, brandPool, totalPyeong) {
       status: '보통',
       locationType: `도면 구획 ${i + 1}`,
       path: pathFromPts(r.pts),
-      center: centroidOf(r.pts),
-      labelWidth: Math.max(70, Math.min(r.bbox.w * 0.92, 240)),
+      // 에지 튜닝용 원본 꼭짓점 — 드래그하면 여기서 좌표를 갱신한다
+      pts: r.pts.map((p) => [p[0], p[1]]),
+      auto: true,
+      // 라벨은 다각형 무게중심이 아니라 bbox 중심에 놉는다. 오목한 폴리곤은
+      // 무게중심이 도형 밖으로 나가거나 한쪽으로 치우쳐 글자가 삐진다.
+      center: { x: r.bbox.x + r.bbox.w / 2, y: r.bbox.y + r.bbox.h / 2 },
+      labelWidth: Math.max(28, Math.min(r.bbox.w * 0.94, 240)),
+      labelHeight: Math.max(0, r.bbox.h * 0.92),
       currentBrand: null,
       isReplaced: false,
     };
@@ -1313,6 +1442,7 @@ function zonesFromRegions(regions, brandPool, totalPyeong) {
   }
 
   out.forEach((z, i) => {
+    // 글자 판독을 하지 않으므로 브랜드명은 기존 풀에서 순서대로 채운다
     const src = pool[i];
     if (src) {
       const brand = brandAtPyeong(src, z.area);
@@ -1368,24 +1498,34 @@ function metricFmt(key, v) {
  * 반환: { ok, value } — 실패하면 원래 값으로 롤백해야 한다.
  */
 function parseMetricInput(key, raw, row) {
-  const text = String(raw == null ? '' : raw).trim().replace(/,/g, '').replace(/[%\s원평]/g, '');
-  if (text === '' || text === '-' || text === '.') return { ok: false };
+  const text = String(raw == null ? '' : raw).trim().replace(/,/g, '').replace(/[%\s원평억만]/g, '');
+  if (text === '' || text === '-' || text === '.') return { ok: false, reason: '값을 입력하세요' };
   const num = Number(text);
-  if (!Number.isFinite(num) || num < 0) return { ok: false };
+  if (!Number.isFinite(num)) return { ok: false, reason: '숫자가 아닙니다' };
+  if (num <= 0) return { ok: false, reason: '0보다 큰 값을 입력하세요' };
   const unit = (METRIC_BY_KEY[key] || {}).unit;
   let value = num;
-  if (unit === 'won') value = Math.round(num);
-  else if (unit === 'wonPerPyeong') value = Math.round(num * 1e4);
-  else if (unit === 'percent') value = Math.round(num * 10) / 10;
-  else if (unit === 'pyeong') value = Math.round(num);
-  if (!Number.isFinite(value) || value < 0) return { ok: false };
+  if (unit === 'won') {
+    // 매출·이익액·전년매출은 억 단위로 입력받는다 (9.1 → 9.1억)
+    if (num > 100) return { ok: false, reason: '100억을 넘을 수 없습니다' };
+    value = Math.round(num * 1e8);
+  } else if (unit === 'wonPerPyeong') {
+    if (num > 100000) return { ok: false, reason: '평효율이 범위를 벗어났습니다' };
+    value = Math.round(num * 1e4);
+  } else if (unit === 'percent') {
+    if (num > 100) return { ok: false, reason: '100%를 넘을 수 없습니다' };
+    value = Math.round(num * 10) / 10;
+  } else if (unit === 'pyeong') {
+    value = Math.round(num);
+  }
+  if (!Number.isFinite(value) || value <= 0) return { ok: false, reason: '0보다 큰 값을 입력하세요' };
   return { ok: true, value };
 }
 
-/** 입력값을 화면 표시용 원시 숫자로 (편집기 초기값) */
+/** 입력값을 화면 표시용 원시 숫자로 (편집기 초기값) — won 계열은 억 단위로 보여준다 */
 function metricEditValue(key, row) {
   const unit = (METRIC_BY_KEY[key] || {}).unit;
-  if (unit === 'won') return String(Math.round(row[key]));
+  if (unit === 'won') return String(Math.round((row[key] / 1e8) * 100) / 100);
   if (unit === 'wonPerPyeong') return String(Math.round(row[key] / 1e4));
   if (unit === 'percent') return String(Number(Number(row[key]).toFixed(1)));
   if (unit === 'pyeong') return String(row[key]);
@@ -1527,10 +1667,10 @@ function KpiCapsule({ label, value, unit, delta, deltaUnit, digits, footnote }) 
 
 function ZoneShape({
   zone, row, hovered, selected, dropActive, dragKind, dragging, pulsing,
-  pointerDragEnabled,
+  pointerDragEnabled, tabIndex,
   onHover, onLeave, onActivate,
   onApplyBrand, onSwap, onDragStartZone, onDragEndZone,
-  onPointerDragStart, ghost,
+  onPointerDragStart, onVertexDrag, ghost,
 }) {
   // 드래그 중일 때만 드롭 표시(빨간 테두리 + 안내 문구)를 켠다
   const dropMode = dropActive && Boolean(dragKind);
@@ -1539,9 +1679,30 @@ function ZoneShape({
   const compact = zone.labelWidth < 130;
   const small = !compact && zone.labelWidth < 180;
 
-  const fill = replaced ? '#ECFDF5' : dropMode ? '#FFF1F2' : hovered ? '#FFF8F8' : '#FFFFFF';
-  const stroke = dropMode ? '#E60012' : replaced ? '#059669' : hovered ? '#E60012' : warning ? '#F59E0B' : '#CBD5E1';
-  const strokeWidth = dropMode ? 3.4 : replaced ? 3 : hovered ? 2.6 : 1.5;
+  const fill = replaced
+    ? '#ECFDF5'
+    : dropMode
+      ? '#FFF1F2'
+      : hovered
+        ? '#FFF8F8'
+        : zone.auto
+          ? '#2563EB'
+          : '#FFFFFF';
+  // 자동 인식 구획은 원본 이미지 위에 파란 구획선으로 얹는다 (지시서 검증 3번).
+  // 채움은 거의 투명하게 두고 테두리만 파랑으로 살린다.
+  const stroke = dropMode
+    ? '#E60012'
+    : replaced
+      ? '#059669'
+      : hovered
+        ? '#E60012'
+        : warning
+          ? '#F59E0B'
+          : zone.auto
+            ? '#2563EB'
+            : '#CBD5E1';
+  const strokeWidth = dropMode ? 3.4 : replaced ? 3 : hovered ? 2.6 : zone.auto ? 1.6 : 1.5;
+  const fillOpacity = ghost ? (zone.auto ? 0.12 : 0.62) : zone.auto ? 0.12 : 1;
 
   const { x: cx, y: cy } = zone.center;
   // 지시서 P1-2: 모든 구역 라벨은 12px 이상. 소구역은 2행(브랜드명+매출)만 상시 노출하고
@@ -1553,15 +1714,49 @@ function ZoneShape({
   const lh = compact ? 15 : small ? 15.5 : 16.5;
   const dense = !compact || selected;
   const lines = dense ? 4 : 2;
-  const top = cy - (lh * (lines - 1)) / 2;
+  // 구획 높이가 라벨 줄 수를 감당하지 못하면 글자가 도형 밖으로 나간다.
+  // 자동 인식 도면은 칸이 작아서 이 판정이 필요하다.
+  const boxH = typeof zone.labelHeight === 'number' && zone.labelHeight > 0
+    ? zone.labelHeight
+    : lh * (lines + 1);
+  const fits4 = dense && boxH >= lh * 4;
+  const fits2 = boxH >= lh * 2;
+  const shownLines = fits4 ? 4 : fits2 ? 2 : 1;
+  const top = cy - (lh * (shownLines - 1)) / 2;
   const y1 = top;
   const y2 = top + lh;
   const y3 = top + lh * 2;
   const y4 = top + lh * 3;
 
-  // 좁은 구역에서 12px를 지키려면 이름을 잘라야 한다 (전체 이름은 title·aria·선택 시 표시)
-  const shownName = compact && row.name.length > 8 ? `${row.name.slice(0, 8)}…` : row.name;
-  const nameFs = Math.max(12, Math.min(fsName, (zone.labelWidth * 1.02) / Math.max(4, shownName.length)));
+  // 글자 폭을 12px 로 고정하면 좌표계가 좁은 구획에서 박스가 강제로 넘진다.
+  // 박스에 들어가는 글자 수를 먼저 구하고, 그 수로 이름을 잘라 쓴다.
+  // 그래도 2글자도 안 들어가면 라벨을 숨기고 title·aria 로만 남긴다.
+  const nameFs = 12;
+  // 한글은 전각(1.0em), 영문·숫자는 0.55em 정도다. 0.62 하나로 잡으면 한글 이름이
+  // 계산보다 넓게 나와 좌우로 삐진다.
+  const charEm = (ch) => (/[\uac00-\ud7a3\u3131-\u318e]/.test(ch) ? 1.0 : ch === ' ' ? 0.32 : 0.56);
+  const textEm = (s) => Array.from(s).reduce((acc, ch) => acc + charEm(ch), 0);
+  const fitChars = Math.max(2, Math.floor((zone.labelWidth - 4) / (nameFs * 0.95)));
+  const maxChars = fitChars;
+  const shownName = row.name.length > maxChars
+    ? `${row.name.slice(0, Math.max(1, maxChars - 1))}…`
+    : row.name;
+  // 글자수로 자른 뒤에도 실제 폭이 남으면 한 글자씩 더 줄인다
+  let finalName = shownName;
+  while (finalName.length > 2 && textEm(finalName) * nameFs > zone.labelWidth - 2) {
+    finalName = `${finalName.slice(0, Math.max(1, finalName.length - 2))}…`;
+  }
+  // 매출·신장율 2행도 구역 폭을 넘으면 줄인다
+  const subText = `월 ${moneyShort(row.salesCurr)} / ${growthText(row.growthRate)}`;
+  const subFs = Math.max(10, Math.min(fsSub, (zone.labelWidth - 2) / Math.max(1, textEm(subText))));
+  const subFits = textEm(subText) * subFs <= zone.labelWidth;
+  // '평효율 2,200만/평' 줄도 좁은 구역에서 좌우로 삐질 수 있어 폭에 맞춰 줄인다
+  const effText = `평효율 ${man(Math.round(row.efficiency / 1e4))}만/평`;
+  const effFs = Math.max(10, Math.min(fsEff, (zone.labelWidth - 2) / Math.max(1, textEm(effText))));
+  const effFits = textEm(effText) * effFs <= zone.labelWidth;
+  // 줄 수와 폭을 둘 다 만족할 때만 해당 행을 그린다
+  const showEff = shownLines >= 4 && effFits;
+  const showPyeong = shownLines >= 4 && zone.labelWidth >= 64;
   const badgeY = y1 - fsName - 3;
   const growth = row.growthRate;
   const gColor = growthColor(growth);
@@ -1569,7 +1764,7 @@ function ZoneShape({
   return (
     <g
       role="button"
-      tabIndex={0}
+      tabIndex={typeof tabIndex === 'number' ? tabIndex : 0}
       data-zone={zone.id}
       className={`zone-group cursor-pointer outline-none ${dragging ? 'zone-dragging' : ''} ${pulsing ? 'swap-pulse' : ''}`}
       onMouseDown={(ev) => {
@@ -1580,8 +1775,25 @@ function ZoneShape({
       aria-label={`${zone.id} ${zone.locationType} ${row.pyeong}평 ${row.name} ${row.category} 매출 ${moneyShort(row.salesCurr)} 신장율 ${growthText(growth)} 평효율 ${man(Math.round(row.efficiency / 1e4))}만 원 이익율 ${row.profitRate}퍼센트`}
       onMouseEnter={() => onHover(zone.id)}
       onMouseLeave={onLeave}
-      onClick={() => onActivate(zone.id)}
-      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onActivate(zone.id); } }}
+      onClick={() => onActivate(zone.id, 'zone')}
+      onKeyDown={(ev) => {
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          // 키보드 Enter 는 선택/입점만 — 두 번째 Enter 가 의도치 않게 자리 교환을 일으키지 않게 한다
+          onActivate(zone.id, 'key');
+          return;
+        }
+        // 구역 간 이동은 화살표 키 — Tab 을 6번 누르지 않아도 된다
+        if (ev.key === 'ArrowRight' || ev.key === 'ArrowLeft' || ev.key === 'ArrowDown' || ev.key === 'ArrowUp') {
+          ev.preventDefault();
+          const groups = Array.from(document.querySelectorAll('g[data-zone]'));
+          const i = groups.indexOf(ev.currentTarget);
+          if (i < 0 || groups.length < 2) return;
+          const step = (ev.key === 'ArrowRight' || ev.key === 'ArrowDown') ? 1 : -1;
+          const next = groups[(i + step + groups.length) % groups.length];
+          if (next) next.focus();
+        }
+      }}
       draggable
       onDragStart={(ev) => {
         ev.dataTransfer.setData('application/x-zone', zone.id);
@@ -1618,7 +1830,7 @@ function ZoneShape({
         className="zone-shape"
         d={zone.path}
         fill={fill}
-        fillOpacity={ghost ? 0.62 : 1}
+        fillOpacity={fillOpacity}
         stroke={stroke}
         strokeWidth={strokeWidth}
         strokeLinejoin="round"
@@ -1627,6 +1839,54 @@ function ZoneShape({
 
       {selected ? (
         <path d={zone.path} fill="none" stroke="#E60012" strokeWidth="2.4" strokeOpacity="0.85" strokeLinejoin="round" />
+      ) : null}
+
+      {selected && zone.auto && Array.isArray(zone.pts) && zone.pts.length >= 3 ? (
+        <g className="vertex-handles">
+          {zone.pts.map((p, i) => (
+            <circle
+              key={`v-${i}`}
+              cx={p[0]}
+              cy={p[1]}
+              r={5.5}
+              fill="#FFFFFF"
+              stroke="#2563EB"
+              strokeWidth={2}
+              style={{ cursor: 'grab' }}
+              onClick={(ev) => ev.stopPropagation()}
+              onMouseDown={(ev) => {
+                // 꼭짓점 드래그 — 구역 전체 드래그로 번지지 않게 막는다
+                ev.preventDefault();
+                ev.stopPropagation();
+                if (!onVertexDrag) return;
+                const svg = ev.currentTarget.ownerSVGElement;
+                if (!svg) return;
+                const ctm = svg.getScreenCTM();
+                if (!ctm) return;
+                const inv = ctm.inverse();
+                const toSvg = (clientX, clientY) => {
+                  const pt = svg.createSVGPoint();
+                  pt.x = clientX;
+                  pt.y = clientY;
+                  const q = pt.matrixTransform(inv);
+                  return [q.x, q.y];
+                };
+                const move = (me) => {
+                  const [x, y] = toSvg(me.clientX, me.clientY);
+                  onVertexDrag(zone.id, i, x, y, false);
+                };
+                const up = (ue) => {
+                  const [x, y] = toSvg(ue.clientX, ue.clientY);
+                  onVertexDrag(zone.id, i, x, y, true);
+                  document.removeEventListener('mousemove', move);
+                  document.removeEventListener('mouseup', up);
+                };
+                document.addEventListener('mousemove', move);
+                document.addEventListener('mouseup', up);
+              }}
+            />
+          ))}
+        </g>
       ) : null}
 
       {dropMode ? (
@@ -1648,32 +1908,29 @@ function ZoneShape({
       ) : null}
 
       <text x={cx} y={y1} textAnchor="middle" fill="#0F172A" fontSize={nameFs} fontWeight="900" fontFamily="Pretendard, sans-serif">
-        {shownName}
+        {finalName}
       </text>
 
-      <text x={cx} y={y2} textAnchor="middle" fontSize={fsSub} fontWeight="800" fontFamily="Pretendard, sans-serif">
-        <tspan fill="#334155">{`월 ${moneyShort(row.salesCurr)}`}</tspan>
-        <tspan fill="#94A3B8" fontWeight="600">{' / '}</tspan>
-        <tspan fill={gColor}>{growthText(growth)}</tspan>
-      </text>
-
-      {dense ? (
-        <text x={cx} y={y3} textAnchor="middle" fill="#475569" fontSize={fsEff} fontWeight="700" fontFamily="Pretendard, sans-serif">
-          {`평효율 ${man(Math.round(row.efficiency / 1e4))}만/평`}
+      {shownLines >= 2 && subFits ? (
+        <text x={cx} y={y2} textAnchor="middle" fontSize={subFs} fontWeight="800" fontFamily="Pretendard, sans-serif">
+          <tspan fill="#334155">{`월 ${moneyShort(row.salesCurr)}`}</tspan>
+          <tspan fill="#94A3B8" fontWeight="600">{' / '}</tspan>
+          <tspan fill={gColor}>{growthText(growth)}</tspan>
         </text>
       ) : null}
 
-      {dense ? (
+      {showEff ? (
+        <text x={cx} y={y3} textAnchor="middle" fill="#475569" fontSize={effFs} fontWeight="700" fontFamily="Pretendard, sans-serif">
+          {effText}
+        </text>
+      ) : null}
+
+      {showPyeong ? (
         <text x={cx} y={y4} textAnchor="middle" fontSize={fsPyeong} fontWeight="700" fontFamily="Pretendard, sans-serif">
           <tspan fill="#0F172A">{`${row.pyeong}평`}</tspan>
           <tspan fill="#94A3B8" fontWeight="600">{` · ${zone.id}`}</tspan>
         </text>
-      ) : (
-        <text x={cx} y={y3} textAnchor="middle" fontSize={fsPyeong} fontWeight="700" fontFamily="Pretendard, sans-serif">
-          <tspan fill="#0F172A">{`${row.pyeong}평`}</tspan>
-          <tspan fill="#94A3B8" fontWeight="600">{` · ${zone.id}`}</tspan>
-        </text>
-      )}
+      ) : null}
     </g>
   );
 }
@@ -1689,7 +1946,7 @@ function FloorPlan({
   rows, hovered, selectedZoneId, dropZoneId, dragZoneId, candidateDrag,
   pulseZone, pointerDragEnabled,
   onHover, onLeave, onActivate, onApplyBrand, onSwap, onDragStartZone, onDragEndZone,
-  onPointerDragStart,
+  onPointerDragStart, onVertexDrag,
   plan, showZones, analysis, showTrace, showRegions,
 }) {
   // DXF처럼 배경 이미지 없이 벡터 라인만 있는 도면도 '업로드됨'으로 취급한다
@@ -1787,11 +2044,12 @@ function FloorPlan({
       {/* 6개 비정형 매장 */}
       {showZones ? (
         <g>
-          {rows.map((row) => (
+          {rows.map((row, zi) => (
             <ZoneShape
               key={row.zoneId}
               zone={row.zone}
               row={row}
+              tabIndex={selectedZoneId === row.zoneId || (selectedZoneId == null && zi === 0) ? 0 : -1}
               hovered={hovered === row.zoneId}
               selected={selectedZoneId === row.zoneId}
               dropActive={dropZoneId === row.zoneId}
@@ -1807,6 +2065,7 @@ function FloorPlan({
               onDragStartZone={onDragStartZone}
               onDragEndZone={onDragEndZone}
               onPointerDragStart={onPointerDragStart}
+              onVertexDrag={onVertexDrag}
               ghost={uploaded}
             />
           ))}
@@ -1843,12 +2102,12 @@ function FloorPlan({
  * 7. CANDIDATE CARD
  * ================================================================ */
 
-function CandidateCard({ brand, selected, usedCount, occupiedZone, onSelect, onDragStart, onDragEnd }) {
+function CandidateCard({ brand, selected, usedCount, occupiedZone, onSelect, onDragStart, onDragEnd, tabIndex, onMove }) {
   const locked = Boolean(occupiedZone);
   return (
     <div
       role="button"
-      tabIndex={0}
+      tabIndex={typeof tabIndex === 'number' ? tabIndex : 0}
       aria-pressed={selected}
       aria-disabled={locked}
       aria-label={locked
@@ -1863,7 +2122,25 @@ function CandidateCard({ brand, selected, usedCount, occupiedZone, onSelect, onD
       }}
       onDragEnd={() => { if (onDragEnd) onDragEnd(); }}
       onClick={() => onSelect(brand.id)}
-      onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onSelect(brand.id); } }}
+      onKeyDown={(ev) => {
+        if (ev.key === 'ArrowDown' || ev.key === 'ArrowRight') {
+          ev.preventDefault();
+          if (onMove) onMove(1);
+          return;
+        }
+        if (ev.key === 'ArrowUp' || ev.key === 'ArrowLeft') {
+          ev.preventDefault();
+          if (onMove) onMove(-1);
+          return;
+        }
+        if (ev.key === 'Enter' || ev.key === ' ') {
+          ev.preventDefault();
+          onSelect(brand.id);
+          // 후보를 고르면 첫 구역으로 포커스를 넘긴다 — Tab 을 세지 않고 바로 Enter 로 배치한다
+          const firstZone = document.querySelector('g[data-zone]');
+          if (firstZone) window.setTimeout(() => firstZone.focus(), 0);
+        }
+      }}
       title={locked ? `이미 ${occupiedZone}에 입점 중인 브랜드입니다` : `${brand.name} · 수수료율 ${brand.commissionRate}%`}
       className={`cand-card flex items-center justify-between gap-2 rounded-xl border p-2.5 ${
         locked
@@ -1981,6 +2258,13 @@ function BrandListPanel({
   candidates, selectedCandidate, usedCounts, occupiedBy, onSelectCandidate,
   onDragStart, onDragEndZone, onCandidateDragStart, onCandidateDragEnd,
 }) {
+  // 교체 후보 탭 전용 검색 (브랜드명·업종)
+  const [candQuery, setCandQuery] = React.useState('');
+  const candKeyword = candQuery.trim().toLowerCase();
+  const visibleCandidates = candKeyword
+    ? candidates.filter((b) => b.name.toLowerCase().includes(candKeyword) || b.category.toLowerCase().includes(candKeyword))
+    : candidates;
+
   return (
     <div className="flex min-h-0 min-w-0 flex-col border-l border-slate-200 bg-white">
       <div className="flex shrink-0 items-center gap-1 border-b border-slate-200 px-3 pt-3">
@@ -2085,20 +2369,62 @@ function BrandListPanel({
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
+          <div className="shrink-0 border-b border-slate-100 p-3">
+            <div className="relative">
+              <span className="pointer-events-none absolute left-2.5 top-1/2 -translate-y-1/2 text-slate-400">
+                <Icon name="Search" size={13} />
+              </span>
+              <input
+                type="search"
+                value={candQuery}
+                onChange={(ev) => setCandQuery(ev.target.value)}
+                placeholder="브랜드명·업종 검색..."
+                aria-label="교체 후보 브랜드 검색"
+                className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-8 text-[11.5px] font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-500"
+              />
+              {candQuery ? (
+                <button
+                  type="button"
+                  onClick={() => setCandQuery('')}
+                  aria-label="후보 검색어 지우기"
+                  title="검색어 지우기"
+                  className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <Icon name="X" size={11} stroke={2.6} />
+                </button>
+              ) : null}
+            </div>
+          </div>
+
           <div className="min-h-0 flex-1 overflow-y-auto p-3 custom-scrollbar">
             <div className="flex flex-col gap-2">
-              {candidates.map((brand) => (
-                <CandidateCard
-                  key={brand.id}
-                  brand={brand}
-                  selected={selectedCandidate === brand.id}
-                  usedCount={usedCounts[brand.name] || 0}
-                  occupiedZone={occupiedBy[brand.name] || null}
-                  onSelect={(id) => onSelectCandidate((cur) => (cur === id ? null : id))}
-                  onDragStart={onCandidateDragStart}
-                  onDragEnd={onCandidateDragEnd}
-                />
-              ))}
+              {visibleCandidates.length === 0 ? (
+                <div className="rounded-xl border border-slate-200 bg-slate-50/60 py-8 text-center">
+                  <p className="text-[11.5px] font-bold text-slate-500">일치하는 후보 브랜드가 없습니다.</p>
+                  <p className="mt-1 text-[10.5px] text-slate-400">검색어를 지우면 전체 {candidates.length}개가 다시 나옵니다</p>
+                </div>
+              ) : (
+                visibleCandidates.map((brand, idx) => (
+                  <CandidateCard
+                    key={brand.id}
+                    brand={brand}
+                    selected={selectedCandidate === brand.id}
+                    usedCount={usedCounts[brand.name] || 0}
+                    occupiedZone={occupiedBy[brand.name] || null}
+                    onSelect={onSelectCandidate}
+                    onDragStart={onCandidateDragStart}
+                    onDragEnd={onCandidateDragEnd}
+                    tabIndex={selectedCandidate === brand.id || (selectedCandidate == null && idx === 0) ? 0 : -1}
+                    onMove={(dir) => {
+                      const cards = Array.from(document.querySelectorAll('.cand-card'));
+                      const i = cards.indexOf(document.activeElement);
+                      if (i < 0) { if (cards[0]) cards[0].focus(); return; }
+                      const nx = cards[(i + dir + cards.length) % cards.length];
+                      if (nx) nx.focus();
+                    }}
+                  />
+                ))
+              )}
             </div>
           </div>
           <div className="shrink-0 border-t border-slate-100 px-3 py-2 text-[10px] font-semibold text-slate-400">
@@ -2118,14 +2444,23 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
   const [editing, setEditing] = React.useState(false);
   const [draft, setDraft] = React.useState('');
   const [invalid, setInvalid] = React.useState(false);
+  const [errorText, setErrorText] = React.useState('');
+  const originRef = React.useRef(0);
   const inputRef = React.useRef(null);
   const metric = METRIC_BY_KEY[metricKey];
   const canEdit = Boolean(metric && metric.editable);
+  // 편집기 입력 단위 → 원 단위 배율 (무변경 판정에 쓴다)
+  const editScale = metric && metric.unit === 'won' ? 1e8
+    : metric && metric.unit === 'wonPerPyeong' ? 1e4
+      : 1;
 
   const start = () => {
-    setDraft(metricEditValue(metricKey, row));
+    const shown = metricEditValue(metricKey, row);
+    originRef.current = Number(String(shown).replace(/,/g, '')) * editScale;
+    setDraft(shown);
     setEditing(true);
     setInvalid(false);
+    setErrorText('');
     if (onSelectZone) onSelectZone();
   };
 
@@ -2136,43 +2471,57 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
     }
   }, [editing]);
 
+  /** 편집 종료 — 값이 실제로 바뀐 경우에만 onCommit 을 호출한다 */
   const commit = () => {
+    const raw = String(draft == null ? '' : draft).trim().replace(/,/g, '').replace(/[%\s원평억만]/g, '');
     const parsed = parseMetricInput(metricKey, draft, row);
     if (!parsed.ok) {
-      // 비정상 입력: 저장하지 않고 붉게 흔든 뒤 원래 값 유지
       setInvalid(true);
+      setErrorText(parsed.reason || '값을 확인하세요');
       if (inputRef.current) inputRef.current.select();
-      window.setTimeout(() => { setInvalid(false); setEditing(false); }, 500);
+      window.setTimeout(() => { setInvalid(false); }, 600);
       return;
     }
+    // 무변경이면 토스트·뱃지·카운트를 건드리지 않고 조용히 닫는다
+    const same = raw !== '' && Math.abs(parsed.value - originRef.current) < 1e-6;
     setEditing(false);
+    setInvalid(false);
+    setErrorText('');
+    if (same) return;
     onCommit(metricKey, parsed.value);
   };
 
   if (editing) {
     return (
-      <input
-        ref={inputRef}
-        type="text"
-        inputMode="decimal"
-        className={`inline-editor ${invalid ? 'invalid' : ''}`}
-        value={draft}
-        step="any"
-        onChange={(ev) => setDraft(ev.target.value)}
-        onBlur={commit}
-        onClick={(ev) => ev.stopPropagation()}
-        onDoubleClick={(ev) => ev.stopPropagation()}
-        onKeyDown={(ev) => {
-          ev.stopPropagation();
-          if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
-          if (ev.key === 'Escape') {
-            ev.preventDefault();
-            setEditing(false);
-            setInvalid(false);
-          }
-        }}
-        aria-label={`${row.name} ${metric ? metric.label : ''} 수정`}
-      />
+      <span className="inline-flex flex-col items-end">
+        <input
+          ref={inputRef}
+          type="text"
+          inputMode="decimal"
+          className={`inline-editor ${invalid ? 'invalid' : ''}`}
+          value={draft}
+          step="any"
+          onChange={(ev) => { setDraft(ev.target.value); setErrorText(''); }}
+          onBlur={commit}
+          onClick={(ev) => ev.stopPropagation()}
+          onDoubleClick={(ev) => ev.stopPropagation()}
+          onKeyDown={(ev) => {
+            ev.stopPropagation();
+            if (ev.key === 'Enter') { ev.preventDefault(); commit(); }
+            if (ev.key === 'Escape') {
+              ev.preventDefault();
+              setEditing(false);
+              setInvalid(false);
+              setErrorText('');
+            }
+          }}
+          aria-label={`${row.name} ${metric ? metric.label : ''} 수정 (단위 ${metric && metric.unit === 'won' ? '억' : metric && metric.unit === 'wonPerPyeong' ? '만원' : metric && metric.unit === 'percent' ? '%' : '평'})`}
+          aria-invalid={invalid}
+        />
+        {errorText ? (
+          <span className="mt-0.5 whitespace-nowrap text-[9px] font-bold text-rose-600">{errorText}</span>
+        ) : null}
+      </span>
     );
   }
 
@@ -2394,6 +2743,22 @@ function App() {
   const [showRegions, setShowRegions] = useState(false);
   const [drawHover, setDrawHover] = useState(false);
   const [selectedZoneId, setSelectedZoneId] = useState(null);
+  // 클릭-클릭 교환 무장 상태 — 도면에서 고른 구역만 여기에 기록된다
+  const selectedFromZoneRef = useRef(null);
+
+  /** 목록·랭킹에서 고른 선택은 무장하지 않는다 (도면 클릭 시 실수 교환 방지) */
+  const selectFromList = useCallback((zoneId) => {
+    selectedFromZoneRef.current = null;
+    setSelectedZoneId(zoneId);
+  }, []);
+
+  /** 후보 선택 — 구역 선택과 교환 무장을 함께 해제한다 (Z-01 무장 상태에서 후보를 고르면 무장이 남아
+   *  다음 구역 클릭이 교환으로 오동작하는 것을 막는다) */
+  const selectCandidate = useCallback((id) => {
+    selectedFromZoneRef.current = null;
+    setSelectedZoneId(null);
+    setSelectedCandidate((cur) => (cur === id ? null : id));
+  }, []);
   const [dragZoneId, setDragZoneId] = useState(null);
   const [candidateDrag, setCandidateDrag] = useState(false);
   const [tab, setTab] = useState('brands');
@@ -2532,6 +2897,38 @@ function App() {
     document.addEventListener('mouseup', onUp);
   }, [editingAny, endPointerDrag]);
 
+  /**
+   * 에지 튜닝 — 자동 인식 폴리곤의 꼭짓점을 끌어 모양을 고친다.
+   * final=false 는 드래그 중(즉시 반영), true 는 놓는 순간(평수 재배분 + 알림).
+   */
+  const handleVertexDrag = useCallback((zoneId, index, x, y, final) => {
+    setZones((prev) => {
+      const target = prev.find((z) => z.id === zoneId);
+      if (!target || !Array.isArray(target.pts) || index < 0 || index >= target.pts.length) return prev;
+      const pts = target.pts.map((p, i) => (i === index ? [x, y] : [p[0], p[1]]));
+      const geom = geometryOfPts(pts);
+      const next = prev.map((z) => (z.id === zoneId
+        ? { ...z, pts, path: pathFromPts(pts), ...geom }
+        : z));
+      if (!final) return next;
+      // 놓을 때 면적 비율로 평수를 다시 배분해 합계 200평을 유지한다
+      const areas = next.map((z) => (Array.isArray(z.pts) && z.pts.length >= 3 ? polygonArea(z.pts) : 0));
+      const totalArea = areas.reduce((s, a) => s + a, 0);
+      if (totalArea <= 0) return next;
+      const rescaled = next.map((z, i) => ({
+        ...z,
+        area: Math.max(1, Math.round((areas[i] / totalArea) * PLAN_TOTAL_PYEONG)),
+      }));
+      const diff = PLAN_TOTAL_PYEONG - rescaled.reduce((s, z) => s + z.area, 0);
+      if (rescaled.length) rescaled[0].area = Math.max(1, rescaled[0].area + diff);
+      return rescaled;
+    });
+    if (final) {
+      setEditedZones((prev) => ({ ...prev, [zoneId]: true }));
+      notify(`${zoneId} · 구획 모양 수정`);
+    }
+  }, [notify]);
+
   // handleSwap 은 뒤에서 정의되므로 ref 로 최신 참조를 잡아둔다
   const handleSwapRef = useRef(null);
 
@@ -2541,7 +2938,8 @@ function App() {
       if (z.id !== zoneId) return z;
       const next = updater(z.currentBrand, z.area);
       if (!next) return z;
-      return { ...z, currentBrand: next, isReplaced: true };
+      // 수치만 바뀐 경우 교체(NEW)로 승격하지 않는다 — isReplaced 는 브랜드 교체 전용
+      return { ...z, currentBrand: next };
     }));
     setEditedZones((prev) => ({ ...prev, [zoneId]: true }));
     pulse(zoneId);
@@ -2612,11 +3010,31 @@ function App() {
     return { ...brand, pyeongEfficiency: eff, salesCurr: curr, salesPrev: prev };
   }, [areaMode]);
 
-  /** 구역 클릭 — 후보가 선택돼 있으면 그 자리에 입점, 아니면 하이라이트 */
-  const handleActivate = useCallback((zoneId) => {
+  /** 구역 클릭 — 후보가 선택돼 있으면 입점, 이미 구역이 선택돼 있으면 자리 교환, 아니면 하이라이트 */
+  const handleActivate = useCallback((zoneId, source = 'zone') => {
     const cand = CANDIDATES.find((c) => c.id === selectedCandidate);
     if (!cand) {
-      setSelectedZoneId((cur) => (cur === zoneId ? null : zoneId));
+      // 클릭-클릭 구역 교환: 도면에서 구역을 고른 뒤 다른 구역을 누를 때만 발동한다
+      const armed = selectedFromZoneRef.current;
+      if (source === 'zone' && armed && armed !== zoneId) {
+        const fromId = armed;
+        const prevZones = zones;
+        selectedFromZoneRef.current = null;
+        handleSwapRef.current(fromId, zoneId, { silent: true });
+        setSelectedZoneId(zoneId);
+        notify(`${fromId} ⇄ ${zoneId} 자리 교환`, {
+          label: '되돌리기',
+          run: () => {
+            setZones(prevZones);
+            setSelectedZoneId(fromId);
+            notify('자리 교환을 되돌렸습니다');
+          },
+        });
+        return;
+      }
+      const next = selectedZoneId === zoneId ? null : zoneId;
+      setSelectedZoneId(next);
+      selectedFromZoneRef.current = source === 'zone' && next ? zoneId : null;
       return;
     }
     // 같은 브랜드를 두 구역에 동시에 입점시킬 수 없다
@@ -2635,8 +3053,11 @@ function App() {
     }));
     setSelectedCandidate(null);
     setSelectedZoneId(zoneId);
+    selectedFromZoneRef.current = null;
+    // 교체된 구역은 수치 수정 집계에서 빠진다 (교체와 수정은 별개)
+    setEditedZones((prev) => { const n = { ...prev }; delete n[zoneId]; return n; });
     notify(`${zoneId} · ${cand.name} 입점`);
-  }, [selectedCandidate, notify, brandOccupant]);
+  }, [selectedCandidate, notify, brandOccupant, selectedZoneId, zones]);
 
   /** 후보 브랜드 드롭 */
   const handleApplyBrand = useCallback((zoneId, brand) => {
@@ -2657,13 +3078,14 @@ function App() {
       return { ...z, currentBrand: brandForZone(brand, z.area), isReplaced: true };
     }));
     setSelectedZoneId(zoneId);
-    setEditedZones((prev) => ({ ...prev, [zoneId]: true }));
+    // 드래그 입점도 교체이므로 수정 집계에서 뺀다
+    setEditedZones((prev) => { const n = { ...prev }; delete n[zoneId]; return n; });
     pulse(zoneId);
     notify(`${zoneId} · ${brand.name} 입점`);
   }, [notify, pulse, brandOccupant]);
 
   /** 구역 ↔ 구역 브랜드 자리 교환 (평수가 다르면 매출을 새 면적으로 재계산) */
-  const handleSwap = useCallback((fromId, toId) => {
+  const handleSwap = useCallback((fromId, toId, opts = {}) => {
     setZones((prev) => {
       const a = prev.find((z) => z.id === fromId);
       const b = prev.find((z) => z.id === toId);
@@ -2682,9 +3104,10 @@ function App() {
     });
     setDragZoneId(null);
     setSelectedZoneId(toId);
-    setEditedZones((prev) => ({ ...prev, [fromId]: true, [toId]: true }));
+    // 자리 교환은 교체 건으로만 집계한다 — 매출이 같아도 수정 건으로 중복 집계하지 않는다
+    setEditedZones((prev) => { const n = { ...prev }; delete n[fromId]; delete n[toId]; return n; });
     pulse(toId);
-    notify(`${fromId} ⇄ ${toId} 자리 교환`);
+    if (!opts.silent) notify(`${fromId} ⇄ ${toId} 자리 교환`);
   }, [rebaseBrand, notify, pulse]);
 
   // 포인터 드래그 컨트롤러가 최신 handleSwap 을 참조하도록
@@ -2697,6 +3120,7 @@ function App() {
       if (!origin) return z;
       return { ...z, currentBrand: { ...origin }, isReplaced: false };
     }));
+    setEditedZones((prev) => { const n = { ...prev }; delete n[zoneId]; return n; });
     notify(`${zoneId} 원래 브랜드로 복원`);
   }, [notify]);
 
@@ -2801,7 +3225,36 @@ function App() {
     setParseError(null);
     setParsing('도면 준비 중…');
     try {
-      const out = await analyzeFile(file);
+      // 래스터(JPG/PNG)는 백엔드 CV 파이프라인을 먼저 시도한다.
+      // 백엔드가 없으면 아래 analyzeFile 의 클라이언트 추적으로 자연 폴백된다.
+      let vision = null;
+      if (isRasterPlan(file)) {
+        setParsing('도면 구획 자동 인식 중…');
+        const res = await requestVisionZones(file);
+        if (res.ok) {
+          const converted = visionZonesToRegions(res.data);
+          if (converted) {
+            vision = { ...res.data, ...converted };
+          } else {
+            setParseError('자동 인식이 구획을 찾지 못했습니다 — 직접 그리기로 전환합니다');
+          }
+        } else if (res.reason !== 'unreachable') {
+          setParseError(`자동 인식 실패 (${res.detail}) — 직접 그리기로 전환합니다`);
+        }
+      }
+
+      const out = vision
+        ? {
+            patches: [],
+            regions: vision.regions,
+            rect: vision.rect,
+            stats: {
+              zones: vision.regions.length,
+              engine: vision.engine || 'fill',
+            },
+            kind: 'VISION',
+          }
+        : await analyzeFile(file);
 
       // 배경 이미지 URL
       if (planUrlRef.current) URL.revokeObjectURL(planUrlRef.current);
@@ -2811,6 +3264,9 @@ function App() {
       } else if (out.raster) {
         const blob = await new Promise((res) => out.raster.toBlob(res, 'image/png'));
         url = URL.createObjectURL(blob);
+      } else if (isRasterPlan(file)) {
+        // 자동 인식 경로: 원본 이미지를 그대로 배경으로 깔고 폴리곤만 위에 올린다
+        url = URL.createObjectURL(file);
       }
       planUrlRef.current = url;
 
@@ -2820,7 +3276,7 @@ function App() {
       setAnalysis({ ...out, pathD, regionD });
       setPlan({ url, name: file.name, kind: out.kind });
       setShowZones(true);
-      setShowTrace(out.kind !== 'SVG');
+      setShowTrace(!!pathD);
 
       // 도면에서 읽은 구획으로 구역을 새로 세운다 (기존 목업을 걷어낸다)
       const derived = zonesFromRegions(out.regions, ZONES_BASE.map((z) => z.currentBrand), PLAN_TOTAL_PYEONG);
@@ -2974,6 +3430,37 @@ function App() {
 
   return (
     <div className="flex h-full flex-col bg-[#FAF9F7]">
+      {/* 키보드 사용자용 건너뛰기 링크 — Tab 1회로 후보/구역에 바로 도달한다 */}
+      <div className="sr-only focus-within:not-sr-only fixed left-3 top-2 z-50 flex gap-1.5 rounded-lg bg-white p-1.5 shadow-lift ring-1 ring-slate-300">
+        <button
+          type="button"
+          onClick={() => {
+            setTab('candidates');
+            // React 렌더가 끝난 뒤 카드가 실제로 생겼는지 확인하고 포커스를 넘긴다 (고정 지연은 타이밍을 놓친다)
+            let tries = 0;
+            const focusCard = () => {
+              const card = document.querySelector('.cand-card');
+              if (card) { card.focus(); return; }
+              tries += 1;
+              if (tries < 40) window.setTimeout(focusCard, 50);
+            };
+            window.setTimeout(focusCard, 0);
+          }}
+          className="rounded-md bg-slate-900 px-2.5 py-1 text-[11px] font-black text-white"
+        >
+          교체 후보로 건너뛰기
+        </button>
+        <button
+          type="button"
+          onClick={() => {
+            const zone = document.querySelector('g[data-zone]');
+            if (zone) zone.focus();
+          }}
+          className="rounded-md border border-slate-300 px-2.5 py-1 text-[11px] font-black text-slate-700"
+        >
+          도면 구역으로 건너뛰기
+        </button>
+      </div>
       {/* ---------- HEADER ---------- */}
       <header className="z-20 flex h-[74px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white/90 px-6 backdrop-blur-md">
         <div className="flex shrink-0 items-center gap-3">
@@ -3047,21 +3534,24 @@ function App() {
               <div className="flex shrink-0 items-center gap-1.5">
                 <input
                   ref={fileRef}
+                  id="plan-file-input"
                   type="file"
                   accept=".dxf,.svg,.pdf,.png,.jpg,.jpeg,image/svg+xml,application/pdf,image/png,image/jpeg"
                   onChange={handlePickPlan}
-                  className="hidden"
+                  className="sr-only"
                   aria-label="도면 파일 선택"
                 />
-                <button
-                  type="button"
-                  onClick={() => fileRef.current && fileRef.current.click()}
+                <label
+                  htmlFor="plan-file-input"
+                  role="button"
+                  tabIndex={0}
+                  onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); if (fileRef.current) fileRef.current.click(); } }}
                   title="지원 형식: DXF / SVG / PDF / PNG / JPG · 최대 40MB"
-                  className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
+                  className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
                 >
                   <Icon name="Upload" size={12} />
                   도면 업로드
-                </button>
+                </label>
                 <span className="hidden shrink-0 text-[10px] font-semibold text-slate-400 xl:inline">DXF·SVG·PDF·PNG·JPG / 40MB</span>
 
                 <button
@@ -3191,6 +3681,7 @@ function App() {
                 pulseZone={pulseZone}
                 pointerDragEnabled={!editingAny}
                 onPointerDragStart={handlePointerDragStart}
+                onVertexDrag={handleVertexDrag}
                 onHover={setHoveredZoneId}
                 onLeave={() => setHoveredZoneId(null)}
                 onActivate={handleActivate}
@@ -3261,7 +3752,7 @@ function App() {
                     {analysis.stats.regions ? ` · 영역 ${analysis.stats.regions}` : ''}
                   </span>
                 ) : null}
-                <span>{rows.length}개 구역 · {currentMetrics.pyeong}평 · 교체 {rows.filter((r) => r.isReplaced).length}건</span>
+                <span>{rows.length}개 구역 · {currentMetrics.pyeong}평 · 교체 {rows.filter((r) => r.isReplaced).length}건 · 수정 {rows.filter((r) => r.edited).length}건</span>
               </div>
             </div>
           </div>
@@ -3273,7 +3764,7 @@ function App() {
               limit={rankLimit}
               dir={rankDir}
               selectedZoneId={selectedZoneId}
-              onSelect={setSelectedZoneId}
+              onSelect={selectFromList}
               onCommitValue={handleCommitMetric}
               onHeaderChange={handleColumnChange}
               onHeaderRemove={handleColumnRemove}
@@ -3289,6 +3780,7 @@ function App() {
           </div>
         </div>
 
+
         {/* 우: 브랜드 목록 (검색 + 정렬) / 교체 후보 */}
         <div className="flex min-h-0 w-[27%] min-w-[300px] max-w-[400px] shrink-0 flex-col">
           <BrandListPanel
@@ -3301,20 +3793,21 @@ function App() {
             sortDir={sortDir}
             onToggleDir={() => setSortDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
             selectedZoneId={selectedZoneId}
-            onSelect={setSelectedZoneId}
+            onSelect={selectFromList}
             tab={tab}
             onTab={setTab}
             candidates={CANDIDATES}
             selectedCandidate={selectedCandidate}
             usedCounts={usedCounts}
             occupiedBy={usedBy}
-            onSelectCandidate={setSelectedCandidate}
+            onSelectCandidate={selectCandidate}
             onDragStart={setDragZoneId}
             onDragEndZone={() => setDragZoneId(null)}
             onCandidateDragStart={() => setCandidateDrag(true)}
             onCandidateDragEnd={() => setCandidateDrag(false)}
           />
         </div>
+
       </div>
 
       {toast ? (
