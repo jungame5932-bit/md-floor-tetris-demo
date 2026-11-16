@@ -105,7 +105,17 @@
   }
   .zone-dragging { opacity: 0.4; }
   .zone-dragging .zone-shape { stroke-dasharray: 5, 5; }
-  .zone-shape { transition: fill .16s ease, stroke .16s ease, stroke-width .16s ease; }
+  .zone-shape { transition: fill .16s ease, stroke .16s ease, stroke-width .16s ease, fill-opacity .3s ease; }
+  /* 데이터 집중 모드 — 배경 도면을 흑백 반투명으로 죽이고 폴리곤을 진하게 */
+  .dimmed-bg {
+    opacity: 0.15 !important;
+    filter: grayscale(100%) !important;
+    transition: opacity 0.3s ease, filter 0.3s ease;
+  }
+  .focus-mode .zone-poly {
+    fill-opacity: 0.85 !important;
+    stroke-width: 2.5px !important;
+  }
   .cand-card { transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
   .cand-card:hover { border-color: #94A3B8; }
   /* P1-3: 포커스는 롯데 레드 아웃라인으로 통일. Tailwind 의 outline-none 이 나중에 주입되므로 !important 로 이긴다. */
@@ -2142,7 +2152,7 @@ function ZoneShape({
       <title>{`${zone.id} · ${zone.locationType} · ${row.category}`}</title>
 
       <path
-        className="zone-shape"
+        className="zone-shape zone-poly"
         d={zone.path}
         fill={fill}
         fillOpacity={fillOpacity}
@@ -2271,7 +2281,7 @@ function FloorPlan({
   const bgHidden = !showBg;
 
   return (
-    <svg viewBox={`0 0 ${VIEWBOX.w} ${VIEWBOX.h}`} className="h-full w-full" preserveAspectRatio="xMidYMid meet"
+    <svg viewBox={`0 0 ${VIEWBOX.w} ${VIEWBOX.h}`} className={`h-full w-full${bgHidden ? ' focus-mode' : ''}`} preserveAspectRatio="xMidYMid meet"
       role="img" aria-label="잠실점 지하 1층 식품관 평면도">
       <defs>
         <filter id="soft-shadow" x="-8%" y="-8%" width="116%" height="116%">
@@ -2286,26 +2296,28 @@ function FloorPlan({
 
       {uploaded ? (
         <g>
-          {/* 배경을 끄면 연한 회색 바탕만 남기고 도면 이미지를 걷어낸다 (지시서 Step 3-4) */}
-          <rect x="0" y="0" width={VIEWBOX.w} height={VIEWBOX.h} fill={bgHidden ? '#F8FAFC' : '#FFFFFF'} />
-          {plan.url && showBg ? (
+          {/* 화이트박스 제거 — SVG 바탕을 비워야 뒤의 모눈이 그대로 비친다 (지시서 Step 1) */}
+          <rect x="0" y="0" width={VIEWBOX.w} height={VIEWBOX.h} fill="transparent" />
+          {plan.url ? (
             analysis && analysis.rect ? (
               // 래스터: 추적선과 같은 letterbox 사각형에 그려야 어긋나지 않는다
               <image
                 id="floorplanBgImage"
+                className={bgHidden ? 'dimmed-bg' : ''}
                 href={plan.url}
                 x={analysis.rect.x} y={analysis.rect.y}
                 width={analysis.rect.w} height={analysis.rect.h}
                 preserveAspectRatio="none"
-                style={{ pointerEvents: 'none', opacity: showTrace ? 0.26 : 1 }}
+                style={{ pointerEvents: 'none', mixBlendMode: 'multiply', opacity: showTrace && !bgHidden ? 0.26 : 1 }}
               />
             ) : (
               <image
                 id="floorplanBgImage"
+                className={bgHidden ? 'dimmed-bg' : ''}
                 href={plan.url}
                 x="0" y="0" width={VIEWBOX.w} height={VIEWBOX.h}
                 preserveAspectRatio="xMidYMid meet"
-                style={{ pointerEvents: 'none', opacity: showTrace ? 0.26 : 1 }}
+                style={{ pointerEvents: 'none', mixBlendMode: 'multiply', opacity: showTrace && !bgHidden ? 0.26 : 1 }}
               />
             )
           ) : null}
@@ -3887,14 +3899,14 @@ function App() {
                   구역 표시
                 </button>
 
-                {/* 배경 도면 토글 — 도면이 없으면 비활성 (지시서 Step 3 · 4번) */}
+                {/* 배경 도면 토글 — 숨기지 않고 흑백 반투명으로 죽인다 (지시서 Step 2 · 4번) */}
                 <button
                   id="toggleBgBtn"
                   type="button"
                   onClick={() => setShowBg((v) => !v)}
                   disabled={!plan}
                   aria-pressed={!showBg}
-                  title={plan ? (showBg ? '원본 도면 배경 숨기기' : '원본 도면 배경 보기') : '도면을 먼저 업로드하세요'}
+                  title={plan ? (showBg ? '배경 도면을 흐리게 해서 데이터에 집중합니다' : '원본 도면 배경을 선명하게 봅니다') : '도면을 먼저 업로드하세요'}
                   className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition active:scale-95 ${
                     !plan
                       ? 'cursor-not-allowed border-slate-200 bg-slate-50 text-slate-300'
@@ -3904,7 +3916,7 @@ function App() {
                   }`}
                 >
                   <Icon name={showBg ? 'EyeOff' : 'Eye'} size={12} />
-                  {showBg ? '배경 도면 끄기' : '배경 도면 켜기'}
+                  {showBg ? '배경 도면 흐리게' : '집중 모드 해제'}
                 </button>
 
                 {analysis ? (
