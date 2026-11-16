@@ -19,7 +19,7 @@
           lotte: { red: '#E60012', dark: '#B3000E' },
         },
         boxShadow: {
-          card: '0 2px 10px -3px rgba(6,81,237,0.05)',
+          card: '0 0 0 0 rgba(0,0,0,0)',
           lift: '0 12px 28px -12px rgba(15,23,42,0.18)',
         },
       },
@@ -42,10 +42,15 @@
     user-select: none;
   }
   .tabular { font-variant-numeric: tabular-nums; }
+  /* CAD 격자 — 5평 단위 옅은 실선 (D9) */
   .cad-canvas-bg {
-    background-color: #FAFAFC;
-    background-image: radial-gradient(#CBD5E1 1.2px, transparent 1.2px);
-    background-size: 24px 24px;
+    background-color: #FCFBF9;
+    background-image:
+      linear-gradient(to right, rgba(148, 163, 184, 0.18) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.18) 1px, transparent 1px),
+      linear-gradient(to right, rgba(148, 163, 184, 0.07) 1px, transparent 1px),
+      linear-gradient(to bottom, rgba(148, 163, 184, 0.07) 1px, transparent 1px);
+    background-size: 80px 80px, 80px 80px, 16px 16px, 16px 16px;
   }
   .custom-scrollbar::-webkit-scrollbar { width: 5px; }
   .custom-scrollbar::-webkit-scrollbar-thumb { background: #CBD5E1; border-radius: 4px; }
@@ -101,12 +106,15 @@
   .zone-dragging { opacity: 0.4; }
   .zone-dragging .zone-shape { stroke-dasharray: 5, 5; }
   .zone-shape { transition: fill .16s ease, stroke .16s ease, stroke-width .16s ease; }
-  .cand-card { transition: border-color .15s ease, box-shadow .15s ease, transform .15s ease, background .15s ease; }
-  .cand-card:hover { transform: translateY(-1px); }
-  *:focus-visible { outline: 2px solid #0F172A; outline-offset: 2px; }
+  .cand-card { transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
+  .cand-card:hover { border-color: #94A3B8; }
+  /* P1-3: 포커스는 롯데 레드 아웃라인으로 통일 */
+  *:focus-visible { outline: 2px solid #E60012; outline-offset: 2px; }
+  .zone-group:focus-visible { outline: none; }
+  .zone-group:focus-visible .zone-shape { stroke: #E60012; stroke-width: 3; }
 </style>
 </head>
-<body class="flex h-screen flex-col bg-[#F8FAFC] text-slate-800 antialiased">
+<body class="flex h-screen flex-col bg-[#FAF9F7] text-slate-800 antialiased">
 <div id="root" class="flex h-full flex-col"></div>
 
 <script>
@@ -1027,12 +1035,12 @@ const ZONES_BASE = [
 ];
 
 const CANDIDATES = [
-  { id: 'C-01', name: '런던베이글뮤지엄', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, profitRate: 19, growthRate: 34.2, tag: '오픈런 1위 앵커', initials: 'LB' },
-  { id: 'C-02', name: '노티드 월드', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, profitRate: 21, growthRate: 18.5, tag: '2030 패밀리 선호', initials: 'KW' },
-  { id: 'C-03', name: '삐아프 쇼콜라', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, profitRate: 26, growthRate: 9.4, tag: '고마진 선물 수요', initials: 'PF' },
-  { id: 'C-04', name: '땀땀 (TamTam)', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, profitRate: 15, growthRate: -2.1, tag: '회전율 보장 맛집', initials: 'TT' },
-  { id: 'C-05', name: '카멜커피', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, profitRate: 18, growthRate: 24.8, tag: 'MZ 바이럴 핫플', initials: 'CC' },
-  { id: 'C-06', name: '트러플 아티장 델리', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, profitRate: 28, growthRate: 6.7, tag: '와인 페어링 고단가', initials: 'TD' },
+  { id: 'C-01', name: '런던베이글뮤지엄', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, profitRate: 19, growthRate: 34.2, tag: '오픈 30분 대기 · 평일 오전 비중 41%', initials: 'LB' },
+  { id: 'C-02', name: '노티드 월드', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, profitRate: 21, growthRate: 18.5, tag: '주중 재방문 38% · 객단가 1.8만', initials: 'KW' },
+  { id: 'C-03', name: '삐아프 쇼콜라', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, profitRate: 26, growthRate: 9.4, tag: '선물 세트 매출 비중 46%', initials: 'PF' },
+  { id: 'C-04', name: '땀땀 (TamTam)', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, profitRate: 15, growthRate: -2.1, tag: '시간당 회전 2.4회', initials: 'TT' },
+  { id: 'C-05', name: '카멜커피', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, profitRate: 18, growthRate: 24.8, tag: 'SNS 언급 주 1,200건', initials: 'CC' },
+  { id: 'C-06', name: '트러플 아티장 델리', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, profitRate: 28, growthRate: 6.7, tag: '주류 동반 구매 31%', initials: 'TD' },
 ];
 
 const CAT_TAG = {
@@ -1482,24 +1490,30 @@ function DeltaPill({ value, unit, digits = 1 }) {
   const zero = Math.abs(value) < (digits > 1 ? 0.005 : 0.5);
   const cls = zero
     ? 'bg-slate-100 text-slate-500'
-    : value > 0 ? 'bg-emerald-100 text-emerald-700' : 'bg-rose-100 text-rose-700';
+    : value > 0 ? 'bg-emerald-100 text-emerald-800' : 'bg-rose-100 text-rose-800';
   return (
-    <span className={`shrink-0 rounded-full px-2 py-0.5 text-[11px] font-black tabular ${cls}`}>
-      {zero ? '기준' : `${value > 0 ? '▲ +' : '▼ '}${Math.abs(value).toFixed(digits)}${unit}`}
+    <span className={`inline-flex shrink-0 items-center gap-0.5 rounded-full px-2 py-0.5 text-[11px] font-black tabular ${cls}`}>
+      {zero ? '기준' : (
+        <>
+          <Icon name={value > 0 ? 'ArrowUp' : 'ArrowDown'} size={10} stroke={3} />
+          {`${Math.abs(value).toFixed(digits)}${unit}`}
+        </>
+      )}
     </span>
   );
 }
 
 function KpiCapsule({ label, value, unit, delta, deltaUnit, digits, footnote }) {
   return (
-    <div className="flex items-center gap-3 rounded-xl border border-slate-200/90 bg-slate-50 px-4 py-2">
+    <div className="flex items-start gap-3 px-1 py-1">
       <div className="min-w-0">
-        <p className="whitespace-nowrap text-[10px] font-bold text-slate-400">{label}</p>
-        <p className="mt-0.5 whitespace-nowrap text-lg font-black leading-none tabular tracking-tight text-slate-900">
-          {value}<span className="ml-1 text-xs font-semibold text-slate-500">{unit}</span>
+        <p className="whitespace-nowrap text-[10.5px] font-bold tracking-wide text-slate-400">{label}</p>
+        <p className="mt-1 flex items-baseline gap-1 whitespace-nowrap tabular text-slate-900">
+          <span className="text-[30px] font-black leading-none tracking-tighter">{value}</span>
+          <span className="text-[13px] font-bold text-slate-400">{unit}</span>
         </p>
       </div>
-      <div className="flex flex-col items-end gap-1">
+      <div className="flex flex-col items-end gap-1 pt-0.5">
         <DeltaPill value={delta} unit={deltaUnit} digits={digits} />
         {footnote ? <span className="whitespace-nowrap text-[9.5px] font-semibold tabular text-slate-400">{footnote}</span> : null}
       </div>
@@ -1530,19 +1544,24 @@ function ZoneShape({
   const strokeWidth = dropMode ? 3.4 : replaced ? 3 : hovered ? 2.6 : 1.5;
 
   const { x: cx, y: cy } = zone.center;
-  // 지시서: 소형 구획도 10~11px 아래로 내리지 말 것 (line-height 1.2 이내)
-  const fsName = compact ? 11 : small ? 11.5 : 13.5;
-  const fsSub = compact ? 10 : small ? 10 : 10.5;
-  const fsEff = compact ? 10 : small ? 9.5 : 9.5;
-  const fsPyeong = compact ? 10 : small ? 9.5 : 9.5;
-  const lh = compact ? 13.5 : small ? 14 : 15.5;
+  // 지시서 P1-2: 모든 구역 라벨은 12px 이상. 소구역은 2행(브랜드명+매출)만 상시 노출하고
+  // 나머지 2행은 선택했을 때만 펼쳐 위계를 나눈다.
+  const fsName = compact ? 12 : small ? 12.5 : 13.5;
+  const fsSub = 12;
+  const fsEff = 12;
+  const fsPyeong = 12;
+  const lh = compact ? 15 : small ? 15.5 : 16.5;
+  const dense = !compact || selected;
+  const lines = dense ? 4 : 2;
+  const top = cy - (lh * (lines - 1)) / 2;
+  const y1 = top;
+  const y2 = top + lh;
+  const y3 = top + lh * 2;
+  const y4 = top + lh * 3;
 
-  const y1 = cy - lh * 1.5;
-  const y2 = cy - lh * 0.5;
-  const y3 = cy + lh * 0.55;
-  const y4 = cy + lh * 1.55;
-
-  const nameFs = Math.max(fsName * 0.72, Math.min(fsName, (zone.labelWidth * 0.9) / Math.max(6, row.name.length)));
+  // 좁은 구역에서 12px를 지키려면 이름을 잘라야 한다 (전체 이름은 title·aria·선택 시 표시)
+  const shownName = compact && row.name.length > 8 ? `${row.name.slice(0, 8)}…` : row.name;
+  const nameFs = Math.max(12, Math.min(fsName, (zone.labelWidth * 1.02) / Math.max(4, shownName.length)));
   const badgeY = y1 - fsName - 3;
   const growth = row.growthRate;
   const gColor = growthColor(growth);
@@ -1611,25 +1630,25 @@ function ZoneShape({
       ) : null}
 
       {dropMode ? (
-        <text x={cx} y={badgeY - 6} textAnchor="middle" fill="#E60012" fontSize={compact ? 8 : 9.5} fontWeight="900" fontFamily="Pretendard, sans-serif">
+        <text x={cx} y={badgeY - 6} textAnchor="middle" fill="#E60012" fontSize={12} fontWeight="900" fontFamily="Pretendard, sans-serif">
           {dragKind === 'zone' ? '⇄ 자리 교환' : '＋ 여기에 입점'}
         </text>
       ) : replaced ? (
-        <g transform={`translate(${cx - (compact ? 19 : 24)}, ${badgeY - (compact ? 12 : 14)})`}>
-          <rect width={compact ? 38 : 48} height={compact ? 11 : 13} rx="6" fill="#059669" />
-          <text x={compact ? 19 : 24} y={compact ? 8 : 9.5} textAnchor="middle" fill="#FFFFFF" fontSize={compact ? 6.5 : 7.5} fontWeight="900" fontFamily="Pretendard, sans-serif">NEW</text>
+        <g transform={`translate(${cx - 17}, ${badgeY - 15})`}>
+          <rect width="34" height="16" rx="8" fill="#059669" />
+          <text x="17" y="11.5" textAnchor="middle" fill="#FFFFFF" fontSize={12} fontWeight="900" fontFamily="Pretendard, sans-serif">NEW</text>
         </g>
       ) : warning ? (
-        <g transform={`translate(${cx - (compact ? 22 : 30)}, ${badgeY - (compact ? 12 : 14)})`}>
-          <rect width={compact ? 44 : 60} height={compact ? 11 : 13} rx="6" fill="#FEF3C7" stroke="#F59E0B" strokeWidth="1" />
-          <text x={compact ? 22 : 30} y={compact ? 8 : 9.5} textAnchor="middle" fill="#B45309" fontSize={compact ? 6.5 : 7.5} fontWeight="800" fontFamily="Pretendard, sans-serif">
-            {compact ? '⚠ 개선' : '⚠ 개편요망'}
+        <g transform={`translate(${cx - 27}, ${badgeY - 15})`}>
+          <rect width="54" height="16" rx="8" fill="#FEF3C7" stroke="#F59E0B" strokeWidth="1" />
+          <text x="27" y="11.5" textAnchor="middle" fill="#B45309" fontSize={12} fontWeight="800" fontFamily="Pretendard, sans-serif">
+            {compact ? '개선' : '개편요망'}
           </text>
         </g>
       ) : null}
 
       <text x={cx} y={y1} textAnchor="middle" fill="#0F172A" fontSize={nameFs} fontWeight="900" fontFamily="Pretendard, sans-serif">
-        {row.name}
+        {shownName}
       </text>
 
       <text x={cx} y={y2} textAnchor="middle" fontSize={fsSub} fontWeight="800" fontFamily="Pretendard, sans-serif">
@@ -1638,14 +1657,23 @@ function ZoneShape({
         <tspan fill={gColor}>{growthText(growth)}</tspan>
       </text>
 
-      <text x={cx} y={y3} textAnchor="middle" fill="#475569" fontSize={fsEff} fontWeight="700" fontFamily="Pretendard, sans-serif">
-        {`평효율 ${man(Math.round(row.efficiency / 1e4))}만/평`}
-      </text>
+      {dense ? (
+        <text x={cx} y={y3} textAnchor="middle" fill="#475569" fontSize={fsEff} fontWeight="700" fontFamily="Pretendard, sans-serif">
+          {`평효율 ${man(Math.round(row.efficiency / 1e4))}만/평`}
+        </text>
+      ) : null}
 
-      <text x={cx} y={y4} textAnchor="middle" fontSize={fsPyeong} fontWeight="700" fontFamily="Pretendard, sans-serif">
-        <tspan fill="#0F172A">{`${row.pyeong}평`}</tspan>
-        <tspan fill="#94A3B8" fontWeight="600">{` · ${zone.id}`}</tspan>
-      </text>
+      {dense ? (
+        <text x={cx} y={y4} textAnchor="middle" fontSize={fsPyeong} fontWeight="700" fontFamily="Pretendard, sans-serif">
+          <tspan fill="#0F172A">{`${row.pyeong}평`}</tspan>
+          <tspan fill="#94A3B8" fontWeight="600">{` · ${zone.id}`}</tspan>
+        </text>
+      ) : (
+        <text x={cx} y={y3} textAnchor="middle" fontSize={fsPyeong} fontWeight="700" fontFamily="Pretendard, sans-serif">
+          <tspan fill="#0F172A">{`${row.pyeong}평`}</tspan>
+          <tspan fill="#94A3B8" fontWeight="600">{` · ${zone.id}`}</tspan>
+        </text>
+      )}
     </g>
   );
 }
@@ -1751,7 +1779,7 @@ function FloorPlan({
             <text x="460" y="309" textAnchor="middle" fill="#475569" fontSize="10.5" fontWeight="800" fontFamily="Pretendard, sans-serif">▲ 1F 명품관</text>
             <rect x="392" y="330" width="136" height="34" rx="6" fill="#F8FAFC" stroke="#E2E8F0" strokeWidth="1" />
             <text x="460" y="351" textAnchor="middle" fill="#475569" fontSize="10.5" fontWeight="800" fontFamily="Pretendard, sans-serif">▼ B2 주차·마트</text>
-            <text x="460" y="386" textAnchor="middle" fill="#94A3B8" fontSize="8" fontWeight="700" letterSpacing="1.4" fontFamily="Pretendard, sans-serif">CENTRAL CORE VOID</text>
+            <text x="460" y="386" textAnchor="middle" fill="#94A3B8" fontSize="8" fontWeight="700" letterSpacing="1.4" fontFamily="Pretendard, sans-serif">중앙 코어 보이드</text>
           </g>
         </g>
       )}
@@ -1815,15 +1843,20 @@ function FloorPlan({
  * 7. CANDIDATE CARD
  * ================================================================ */
 
-function CandidateCard({ brand, selected, usedCount, onSelect, onDragStart, onDragEnd }) {
+function CandidateCard({ brand, selected, usedCount, occupiedZone, onSelect, onDragStart, onDragEnd }) {
+  const locked = Boolean(occupiedZone);
   return (
     <div
       role="button"
       tabIndex={0}
       aria-pressed={selected}
-      aria-label={`${brand.id} ${brand.name} ${brand.category} 평효율 ${man(brand.pyeongEfficiency)}만 원 수수료 ${brand.commissionRate}퍼센트`}
-      draggable
+      aria-disabled={locked}
+      aria-label={locked
+        ? `${brand.id} ${brand.name} 이미 ${occupiedZone}에 입점 중`
+        : `${brand.id} ${brand.name} ${brand.category} 평효율 ${man(brand.pyeongEfficiency)}만 원 수수료율 ${brand.commissionRate}퍼센트`}
+      draggable={!locked}
       onDragStart={(ev) => {
+        if (locked) { ev.preventDefault(); return; }
         ev.dataTransfer.setData('application/json', JSON.stringify(brand));
         ev.dataTransfer.effectAllowed = 'copy';
         if (onDragStart) onDragStart(brand);
@@ -1831,39 +1864,54 @@ function CandidateCard({ brand, selected, usedCount, onSelect, onDragStart, onDr
       onDragEnd={() => { if (onDragEnd) onDragEnd(); }}
       onClick={() => onSelect(brand.id)}
       onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); onSelect(brand.id); } }}
-      className={`cand-card flex cursor-grab items-center justify-between gap-2 rounded-xl border p-2.5 active:cursor-grabbing ${
-        selected
-          ? 'border-rose-500 bg-rose-50/70 ring-2 ring-rose-500/15'
-          : 'border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-card'
+      title={locked ? `이미 ${occupiedZone}에 입점 중인 브랜드입니다` : `${brand.name} · 수수료율 ${brand.commissionRate}%`}
+      className={`cand-card flex items-center justify-between gap-2 rounded-xl border p-2.5 ${
+        locked
+          ? 'cursor-not-allowed border-slate-200 bg-slate-50/80 opacity-60'
+          : selected
+            ? 'cursor-grab border-rose-500 bg-rose-50/70 ring-2 ring-rose-500/15 active:cursor-grabbing'
+            : 'cursor-grab border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-card active:cursor-grabbing'
       }`}
     >
       <div className="flex min-w-0 items-center gap-2.5">
         <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-[11px] font-black ${
-          selected ? 'border-rose-200 bg-white text-rose-700' : 'border-slate-200 bg-slate-100 text-slate-700'
+          locked
+            ? 'border-slate-200 bg-slate-100 text-slate-400'
+            : selected ? 'border-rose-200 bg-white text-rose-700' : 'border-slate-200 bg-slate-100 text-slate-700'
         }`}>
           {brand.initials}
         </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
-            <span className="truncate text-xs font-black tracking-tight text-slate-900">{brand.name}</span>
-            {usedCount > 0 ? (
+            <span className={`truncate text-xs font-black tracking-tight ${locked ? 'text-slate-500' : 'text-slate-900'}`}>{brand.name}</span>
+            {locked ? (
+              <span className="shrink-0 rounded-full bg-slate-200 px-1.5 py-[1px] text-[9px] font-bold text-slate-600">{occupiedZone}</span>
+            ) : usedCount > 0 ? (
               <span className="shrink-0 rounded-full bg-slate-900 px-1.5 py-[1px] text-[9px] font-bold text-white">{usedCount}</span>
             ) : null}
           </div>
           <div className="mt-0.5 flex items-center gap-1.5">
-            <span className="shrink-0 rounded px-1.5 py-[1px] text-[9px] font-bold" style={catStyle(brand.category)}>{brand.category}</span>
-            <span className="truncate text-[10px] font-medium text-slate-400">{brand.tag}</span>
+            {locked ? (
+              <span className="truncate text-[10px] font-bold text-slate-500">입점 중 · 다른 구역에 배치 불가</span>
+            ) : (
+              <>
+                <span className="shrink-0 rounded px-1.5 py-[1px] text-[9px] font-bold" style={catStyle(brand.category)}>{brand.category}</span>
+                <span className="truncate text-[10px] font-medium text-slate-400">{brand.tag}</span>
+              </>
+            )}
           </div>
         </div>
       </div>
       <div className="flex shrink-0 items-center gap-2 text-right">
         <div>
-          <p className="text-[11.5px] font-black tabular tracking-tight text-slate-900">
+          <p className={`text-[11.5px] font-black tabular tracking-tight ${locked ? 'text-slate-500' : 'text-slate-900'}`}>
             {man(brand.pyeongEfficiency)}<span className="ml-0.5 text-[9px] font-semibold text-slate-400">만</span>
           </p>
-          <p className="text-[10px] font-bold tabular text-rose-600">{brand.commissionRate}%</p>
+          <p className={`text-[10px] font-bold tabular ${locked ? 'text-slate-400' : 'text-rose-600'}`}>
+            <span className="mr-0.5 font-semibold text-slate-400">수수료율</span>{brand.commissionRate}%
+          </p>
         </div>
-        <Icon name="GripVertical" size={13} className="text-slate-300" />
+        <Icon name={locked ? 'Lock' : 'GripVertical'} size={13} className="text-slate-300" />
       </div>
     </div>
   );
@@ -1930,7 +1978,7 @@ function BrandRow({ row, selected, sortKey, onSelect, onDragStartZone, onDragEnd
 function BrandListPanel({
   rows, visibleRows, query, onQuery, sortKey, onSortKey, sortDir, onToggleDir,
   selectedZoneId, onSelect, tab, onTab,
-  candidates, selectedCandidate, usedCounts, onSelectCandidate,
+  candidates, selectedCandidate, usedCounts, occupiedBy, onSelectCandidate,
   onDragStart, onDragEndZone, onCandidateDragStart, onCandidateDragEnd,
 }) {
   return (
@@ -1971,8 +2019,19 @@ function BrandListPanel({
                 onChange={(ev) => onQuery(ev.target.value)}
                 placeholder="브랜드명 검색..."
                 aria-label="브랜드명 검색"
-                className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-2.5 text-[11.5px] font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-500"
+                className="w-full rounded-lg border border-slate-300 bg-white py-1.5 pl-8 pr-8 text-[11.5px] font-semibold text-slate-700 outline-none transition placeholder:text-slate-400 focus:border-slate-500"
               />
+              {query ? (
+                <button
+                  type="button"
+                  onClick={() => onQuery('')}
+                  aria-label="검색어 지우기"
+                  title="검색어 지우기"
+                  className="absolute right-1.5 top-1/2 flex h-5 w-5 -translate-y-1/2 items-center justify-center rounded text-slate-400 transition hover:bg-slate-100 hover:text-slate-700"
+                >
+                  <Icon name="X" size={11} stroke={2.6} />
+                </button>
+              ) : null}
             </div>
 
             <div className="flex items-center gap-1.5">
@@ -2034,6 +2093,7 @@ function BrandListPanel({
                   brand={brand}
                   selected={selectedCandidate === brand.id}
                   usedCount={usedCounts[brand.name] || 0}
+                  occupiedZone={occupiedBy[brand.name] || null}
                   onSelect={(id) => onSelectCandidate((cur) => (cur === id ? null : id))}
                   onDragStart={onCandidateDragStart}
                   onDragEnd={onCandidateDragEnd}
@@ -2093,7 +2153,8 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
     return (
       <input
         ref={inputRef}
-        type="number"
+        type="text"
+        inputMode="decimal"
         className={`inline-editor ${invalid ? 'invalid' : ''}`}
         value={draft}
         step="any"
@@ -2158,7 +2219,8 @@ function RankingColumn({
             type="button"
             onClick={() => onHeaderRemove(col.key)}
             aria-label={`${metric.label} 컬럼 삭제`}
-            className="flex h-4 w-4 shrink-0 items-center justify-center rounded text-slate-300 transition hover:bg-rose-50 hover:text-rose-600"
+            className="flex h-6 w-6 shrink-0 items-center justify-center rounded text-slate-400 transition hover:bg-rose-50 hover:text-rose-600"
+            title={`${metric.label} 컬럼 삭제`}
           >
             <Icon name="X" size={10} stroke={2.8} />
           </button>
@@ -2210,15 +2272,17 @@ function RankingColumn({
 function RankingDashboard({
   rows, columns, limit, dir, selectedZoneId, onSelect,
   onCommitValue, onHeaderChange, onHeaderRemove, onAddColumn, onLimit, onToggleDir, pulseZone,
+  onResetColumns,
 }) {
   const unused = METRICS.filter((m) => !columns.includes(m.key));
+  const columnsChanged = columns.join(',') !== DEFAULT_COLUMNS.join(',');
 
   return (
     <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
         <h2 className="flex items-center gap-2 text-[11.5px] font-black text-slate-900">
           <span className="h-2 w-2 rounded-full bg-rose-500" />
-          Dash Board
+          지표 대시보드
           <span className="text-[10px] font-bold text-slate-400">지표 순위 · 수치 더블클릭 편집</span>
         </h2>
 
@@ -2254,12 +2318,27 @@ function RankingDashboard({
           </button>
 
           <span className="text-[10px] font-bold text-slate-400">{rows.length}개 구역</span>
+
+          <button
+            type="button"
+            onClick={onResetColumns}
+            disabled={!columnsChanged}
+            title={columnsChanged ? '지표 컬럼을 기본 구성으로 되돌립니다' : '이미 기본 구성입니다'}
+            className={`flex items-center gap-1 rounded-lg border px-1.5 py-1 text-[10px] font-black transition active:scale-95 ${
+              columnsChanged
+                ? 'border-slate-300 bg-white text-slate-600 hover:bg-slate-50'
+                : 'cursor-not-allowed border-slate-200 bg-white text-slate-300'
+            }`}
+          >
+            <Icon name="RotateCcw" size={11} stroke={2.4} />
+            컬럼 초기화
+          </button>
         </div>
       </div>
 
       <div className="custom-scrollbar flex min-h-0 flex-1 items-stretch gap-2 overflow-x-auto p-2">
         {columns.map((key) => (
-          <div key={key} className="flex min-h-0 w-[calc((100%-1.5rem)/4)] min-w-[168px] shrink-0 flex-col">
+          <div key={key} className="flex min-h-0 flex-col" style={{ flexGrow: key === 'salesCurr' ? 1.5 : 1, flexBasis: 0, minWidth: 150 }}>
             <RankingColumn
               col={{ key }}
               rows={rows}
@@ -2301,6 +2380,10 @@ function App() {
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [hoveredZoneId, setHoveredZoneId] = useState(null);
   const [toast, setToast] = useState(null);
+  const [toastAction, setToastAction] = useState(null);
+  // 리셋 확인 다이얼로그 — null 이면 닫힘
+  const [resetAsk, setResetAsk] = useState(null);
+  const undoRef = useRef(null);
   const toastTimer = useRef(null);
   const [plan, setPlan] = useState(null);       // { url, name, kind, analysis }
   const [analysis, setAnalysis] = useState(null); // { polys, regions, stats, pathD, regionD }
@@ -2342,6 +2425,17 @@ function App() {
     return counts;
   }, [zones]);
 
+  /** 브랜드 이름 → 입점 중인 구역 id. 한 브랜드는 한 구역에만 있을 수 있다. */
+  const usedBy = useMemo(() => {
+    const map = {};
+    zones.forEach((z) => {
+      if (z.currentBrand && z.currentBrand.name) map[z.currentBrand.name] = z.id;
+    });
+    return map;
+  }, [zones]);
+
+  const brandOccupant = useCallback((name) => usedBy[name] || null, [usedBy]);
+
   useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
 
   // 언마운트 시 마지막 blob URL 해제
@@ -2349,10 +2443,11 @@ function App() {
     if (planUrlRef.current) URL.revokeObjectURL(planUrlRef.current);
   }, []);
 
-  const notify = useCallback((message) => {
+  const notify = useCallback((message, action) => {
     setToast(message);
+    setToastAction(action || null);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => setToast(null), 1900);
+    toastTimer.current = setTimeout(() => { setToast(null); setToastAction(null); }, action ? 7000 : 1900);
   }, []);
 
   /** 구역을 잠깐 펄스로 강조 (스왑 피드백) */
@@ -2465,14 +2560,18 @@ function App() {
   /* ---------------- 대시보드 컬럼 편집 ---------------- */
 
   const handleColumnChange = useCallback((fromKey, toKey) => {
+    if (fromKey === toKey) return;
+    const fromLabel = (METRIC_BY_KEY[fromKey] || {}).label || fromKey;
+    const toLabel = (METRIC_BY_KEY[toKey] || {}).label || toKey;
     setColumns((prev) => {
-      if (prev.includes(toKey) && toKey !== fromKey) {
-        // 이미 다른 컬럼에 있는 지표를 고르면 두 컬럼을 맞바꾼다
+      if (prev.includes(toKey)) {
+        // 이미 다른 컬럼에 있는 지표를 고르면 두 컬럼을 맞바꾼다 — 조용히 바뀌면 혼란스럽다
+        notify(`${toLabel} 컬럼과 ${fromLabel} 컬럼의 위치를 맞바꿨습니다`);
         return prev.map((k) => (k === fromKey ? toKey : k === toKey ? fromKey : k));
       }
       return prev.map((k) => (k === fromKey ? toKey : k));
     });
-  }, []);
+  }, [notify]);
 
   const handleColumnRemove = useCallback((key) => {
     setColumns((prev) => (prev.length <= 1 ? prev : prev.filter((k) => k !== key)));
@@ -2520,6 +2619,16 @@ function App() {
       setSelectedZoneId((cur) => (cur === zoneId ? null : zoneId));
       return;
     }
+    // 같은 브랜드를 두 구역에 동시에 입점시킬 수 없다
+    const occupied = brandOccupant(cand.name);
+    if (occupied) {
+      notify(occupied === zoneId
+        ? `${cand.name}은(는) 이미 ${zoneId}에 입점 중입니다`
+        : `이미 ${occupied}에 입점 중인 브랜드입니다`);
+      setSelectedCandidate(null);
+      setSelectedZoneId(occupied);
+      return;
+    }
     setZones((prev) => prev.map((z) => {
       if (z.id !== zoneId) return z;
       return { ...z, currentBrand: brandForZone(cand, z.area), isReplaced: true };
@@ -2527,11 +2636,22 @@ function App() {
     setSelectedCandidate(null);
     setSelectedZoneId(zoneId);
     notify(`${zoneId} · ${cand.name} 입점`);
-  }, [selectedCandidate, notify]);
+  }, [selectedCandidate, notify, brandOccupant]);
 
   /** 후보 브랜드 드롭 */
   const handleApplyBrand = useCallback((zoneId, brand) => {
     if (!brand) { notify('후보 브랜드 정보를 읽지 못했습니다'); return; }
+    // 드래그 경로도 클릭과 같은 중복 가드를 통과해야 한다
+    const occupied = brandOccupant(brand.name);
+    if (occupied && occupied !== zoneId) {
+      notify(`이미 ${occupied}에 입점 중인 브랜드입니다`);
+      setSelectedZoneId(occupied);
+      return;
+    }
+    if (occupied === zoneId) {
+      notify(`${brand.name}은(는) 이미 ${zoneId}에 입점 중입니다`);
+      return;
+    }
     setZones((prev) => prev.map((z) => {
       if (z.id !== zoneId) return z;
       return { ...z, currentBrand: brandForZone(brand, z.area), isReplaced: true };
@@ -2540,7 +2660,7 @@ function App() {
     setEditedZones((prev) => ({ ...prev, [zoneId]: true }));
     pulse(zoneId);
     notify(`${zoneId} · ${brand.name} 입점`);
-  }, [notify, pulse]);
+  }, [notify, pulse, brandOccupant]);
 
   /** 구역 ↔ 구역 브랜드 자리 교환 (평수가 다르면 매출을 새 면적으로 재계산) */
   const handleSwap = useCallback((fromId, toId) => {
@@ -2750,38 +2870,87 @@ function App() {
     notify('기본 도면으로 되돌렸습니다');
   }, [notify]);
 
-  const handleReset = useCallback(() => {
-    // 업로드한 도면이 떠 있으면 그 도면의 구획으로 되돌린다.
-    // 내장 목업으로 되돌리면 새 도면 위에 옛 폴리곤이 다시 얹힌다.
+  /** 리셋이 되돌릴 대상 — 방안 A(전체 리셋). 스냅샷을 찍어 1회 되돌리기를 지원한다. */
+  const performReset = useCallback(() => {
+    const snapshot = {
+      zones: cloneZoneList(zones),
+      editedZones: { ...editedZones },
+      columns: [...columns],
+      sortKey,
+      sortDir,
+      rankLimit,
+      rankDir,
+      areaMode,
+      query,
+      selectedZoneId,
+    };
+    undoRef.current = snapshot;
+
+    // 브랜드·수치
     if (planZones && planZones.length) {
       const restored = cloneZoneList(planZones);
       setZones(restored);
       setBaseline(metricsOf(restored));
-      setSelectedCandidate(null);
-      setHoveredZoneId(null);
-      setEditedZones({});
-      setPulseZone(null);
-      notify(`도면 구획 ${restored.length}개로 복원했습니다`);
-      return;
-    }
-    if (planZones) {
+    } else if (planZones) {
       setZones([]);
       setBaseline({ rev: 0, profit: 0, pyeong: 0, eff: 0, profitRate: 0 });
-      setSelectedCandidate(null);
-      setHoveredZoneId(null);
-      setEditedZones({});
-      setPulseZone(null);
-      notify('이 도면에서 복원할 구획이 없습니다');
-      return;
+    } else {
+      setZones(cloneBase());
+      setBaseline(metricsOf(ZONES_BASE));
     }
-    setZones(cloneBase());
-    setBaseline(metricsOf(ZONES_BASE));
+
+    // 대시보드 구성·정렬·모드
+    setColumns(DEFAULT_COLUMNS);
+    setSortKey('salesCurr');
+    setSortDir('desc');
+    setRankLimit(3);
+    setRankDir('desc');
+    setAreaMode('efficiency');
+    setQuery('');
+
+    // 선택·편집 흔적
     setSelectedCandidate(null);
+    setSelectedZoneId(null);
     setHoveredZoneId(null);
     setEditedZones({});
     setPulseZone(null);
-    notify('초기 도면으로 복원했습니다');
-  }, [planZones, notify]);
+
+    const target = planZones && planZones.length
+      ? `도면 구획 ${planZones.length}개`
+      : planZones ? '빈 도면' : '초기 도면';
+    notify(`${target}으로 되돌렸습니다. 교체 0건, 컬럼·정렬·면적 모드도 초기값입니다`, {
+      label: '되돌리기',
+      run: () => {
+        const s = undoRef.current;
+        if (!s) return;
+        undoRef.current = null;
+        setZones(s.zones);
+        setEditedZones(s.editedZones);
+        setColumns(s.columns);
+        setSortKey(s.sortKey);
+        setSortDir(s.sortDir);
+        setRankLimit(s.rankLimit);
+        setRankDir(s.rankDir);
+        setAreaMode(s.areaMode);
+        setQuery(s.query);
+        setSelectedZoneId(s.selectedZoneId);
+        notify('리셋 직전 상태로 되돌렸습니다');
+      },
+    });
+  }, [zones, editedZones, columns, sortKey, sortDir, rankLimit, rankDir, areaMode, query, selectedZoneId, planZones, notify]);
+
+  /** 리셋 요청 — 변경이 있으면 확인 다이얼로그를, 없으면 바로 실행한다 */
+  const handleReset = useCallback(() => {
+    const replaceCount = zones.filter((z) => z.isReplaced).length;
+    const editCount = Object.keys(editedZones).length;
+    const colsChanged = columns.join(',') !== DEFAULT_COLUMNS.join(',');
+    const settingsChanged = sortKey !== 'salesCurr' || sortDir !== 'desc'
+      || rankLimit !== 3 || rankDir !== 'desc' || areaMode !== 'efficiency' || query !== '';
+    const total = replaceCount + editCount + (colsChanged ? 1 : 0) + (settingsChanged ? 1 : 0);
+
+    if (total === 0) { performReset(); return; }
+    setResetAsk({ replaceCount, editCount, colsChanged, settingsChanged, total });
+  }, [zones, editedZones, columns, sortKey, sortDir, rankLimit, rankDir, areaMode, query, performReset]);
 
   const rows = useMemo(
     () => storeRows(zones).map((r) => ({ ...r, edited: Boolean(editedZones[r.zoneId]) })),
@@ -2804,7 +2973,7 @@ function App() {
   }, [rows, query, sortKey, sortDir]);
 
   return (
-    <div className="flex h-full flex-col bg-[#F8FAFC]">
+    <div className="flex h-full flex-col bg-[#FAF9F7]">
       {/* ---------- HEADER ---------- */}
       <header className="z-20 flex h-[74px] shrink-0 items-center justify-between gap-4 border-b border-slate-200 bg-white/90 px-6 backdrop-blur-md">
         <div className="flex shrink-0 items-center gap-3">
@@ -2838,7 +3007,7 @@ function App() {
             footnote={`기준 ${man(baseline.eff)}만`}
           />
           <KpiCapsule
-            label="총 이익액 (평균 이익율)"
+            label="총 이익액"
             value={currentMetrics.profit.toFixed(2)}
             unit="억"
             delta={deltaProfit}
@@ -2861,7 +3030,7 @@ function App() {
 
       {/* ---------- BODY : 도면(좌상) + 대시보드(좌하) + 브랜드목록(우) ---------- */}
       <div className="flex min-h-0 flex-1 gap-3 overflow-hidden p-3">
-        {/* 좌: 도면 + Dash Board */}
+        {/* 좌: 도면 + 지표 대시보드 */}
         <div className="flex min-h-0 min-w-0 flex-[1_1_73%] flex-col gap-3">
           <div className="cad-canvas-bg flex min-h-0 flex-[7] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/90 px-4 py-2 text-xs font-semibold text-slate-500 backdrop-blur-sm">
@@ -2871,7 +3040,7 @@ function App() {
                   <span className="truncate">{plan ? plan.name : 'LOTTE-JS-B1-ASYMMETRIC.svg'}</span>
                 </span>
                 <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
-                  {plan ? plan.kind : 'BUILT-IN'}
+                  {plan ? plan.kind : '내장 도면'}
                 </span>
               </div>
 
@@ -2887,20 +3056,23 @@ function App() {
                 <button
                   type="button"
                   onClick={() => fileRef.current && fileRef.current.click()}
+                  title="지원 형식: DXF / SVG / PDF / PNG / JPG · 최대 40MB"
                   className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
                 >
                   <Icon name="Upload" size={12} />
                   도면 업로드
                 </button>
+                <span className="hidden shrink-0 text-[10px] font-semibold text-slate-400 xl:inline">DXF·SVG·PDF·PNG·JPG / 40MB</span>
 
                 <button
                   type="button"
                   onClick={() => setShowZones((v) => !v)}
                   aria-pressed={showZones}
+                  title={showZones ? '구역 라벨 끄기' : '구역 라벨 켜기'}
                   className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition active:scale-95 ${
                     showZones
-                      ? 'border-slate-300 bg-white text-slate-700 hover:bg-slate-50'
-                      : 'border-slate-200 bg-slate-100 text-slate-400 hover:bg-slate-50'
+                      ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
+                      : 'border-slate-300 bg-white text-slate-500 hover:bg-slate-50'
                   }`}
                 >
                   <Icon name="Layers" size={12} />
@@ -2914,8 +3086,8 @@ function App() {
                     aria-pressed={showTrace}
                     className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition active:scale-95 ${
                       showTrace
-                        ? 'border-slate-900 bg-slate-900 text-white'
-                        : 'border-slate-200 bg-white text-slate-400 hover:bg-slate-50'
+                        ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
+                        : 'border-slate-300 bg-white text-slate-500 hover:bg-slate-50'
                     }`}
                   >
                     <Icon name="Spline" size={12} />
@@ -2930,8 +3102,8 @@ function App() {
                     aria-pressed={showRegions}
                     className={`flex items-center gap-1.5 rounded-lg border px-2.5 py-1.5 text-[11px] font-bold transition active:scale-95 ${
                       showRegions
-                        ? 'border-rose-500 bg-rose-50 text-rose-700'
-                        : 'border-slate-200 bg-white text-slate-400 hover:bg-slate-50'
+                        ? 'border-slate-900 bg-slate-900 text-white hover:bg-slate-800'
+                        : 'border-slate-300 bg-white text-slate-500 hover:bg-slate-50'
                     }`}
                   >
                     <Icon name="Frame" size={12} />
@@ -2976,6 +3148,14 @@ function App() {
                   </button>
                 ) : null}
               </div>
+            </div>
+
+            <div className="flex shrink-0 items-center justify-end border-t border-slate-100 px-4 py-1 text-[10px] font-semibold text-slate-400">
+              <span className="tabular">
+                {areaMode === 'efficiency'
+                  ? '평효율 유지 — 25평→15평 이동 시 매출도 6.75억→4.05억으로 다시 계산'
+                  : '매출 고정 — 25평→15평 이동해도 매출은 그대로, 평효율만 다시 계산'}
+              </span>
             </div>
 
             <div
@@ -3028,6 +3208,17 @@ function App() {
               {drawHover ? (
                 <div className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-xl border-2 border-rose-300 bg-white/70 ring-4 ring-rose-200/60">
                   <span className="text-sm font-black text-rose-600">여기에 놓으면 도면으로 적용됩니다</span>
+                </div>
+              ) : null}
+
+              {!showZones ? (
+                <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
+                  <div className="rounded-xl border border-slate-300 bg-white/95 px-4 py-3 text-center shadow-lift">
+                    <p className="text-[12px] font-black text-slate-700">구역 라벨이 꺼져 있습니다</p>
+                    <p className="mt-1 text-[11px] font-semibold text-slate-500">
+                      다시 켜려면 상단의 <span className="font-black text-slate-700">구역 표시</span>를 누르세요
+                    </p>
+                  </div>
                 </div>
               ) : null}
 
@@ -3087,6 +3278,10 @@ function App() {
               onHeaderChange={handleColumnChange}
               onHeaderRemove={handleColumnRemove}
               onAddColumn={handleColumnAdd}
+              onResetColumns={() => {
+                setColumns(DEFAULT_COLUMNS);
+                notify('지표 컬럼을 기본 구성으로 되돌렸습니다');
+              }}
               onLimit={setRankLimit}
               onToggleDir={() => setRankDir((d) => (d === 'desc' ? 'asc' : 'desc'))}
               pulseZone={pulseZone}
@@ -3112,6 +3307,7 @@ function App() {
             candidates={CANDIDATES}
             selectedCandidate={selectedCandidate}
             usedCounts={usedCounts}
+            occupiedBy={usedBy}
             onSelectCandidate={setSelectedCandidate}
             onDragStart={setDragZoneId}
             onDragEndZone={() => setDragZoneId(null)}
@@ -3122,11 +3318,77 @@ function App() {
       </div>
 
       {toast ? (
-        <div className="pointer-events-none fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift">
+        <div className={`fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift ${toastAction ? 'pointer-events-auto' : 'pointer-events-none'}`}>
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white">
             <Icon name="Check" size={10} stroke={3} />
           </span>
           <span className="text-[12px] font-semibold tracking-tight text-slate-700">{toast}</span>
+          {toastAction ? (
+            <button
+              type="button"
+              onClick={() => {
+                const act = toastAction;
+                setToast(null);
+                setToastAction(null);
+                if (toastTimer.current) clearTimeout(toastTimer.current);
+                if (act && act.run) act.run();
+              }}
+              className="ml-1 shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-black text-slate-700 transition hover:bg-slate-50 active:scale-95"
+            >
+              {toastAction.label}
+            </button>
+          ) : null}
+        </div>
+      ) : null}
+
+      {resetAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="reset-dialog-title"
+            className="w-full max-w-[420px] rounded-2xl border border-slate-200 bg-white p-5 shadow-lift"
+          >
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-rose-50 text-rose-600">
+                <Icon name="RotateCcw" size={15} stroke={2.4} />
+              </span>
+              <div className="min-w-0">
+                <h3 id="reset-dialog-title" className="text-[14px] font-black tracking-tight text-slate-900">전체 리셋</h3>
+                <p className="mt-1 text-[12px] leading-relaxed text-slate-600">
+                  모든 변경이 사라집니다. 계속할까요?
+                </p>
+              </div>
+            </div>
+
+            <ul className="mt-3 space-y-1 rounded-xl border border-slate-200 bg-slate-50 px-3 py-2.5 text-[11.5px] font-semibold text-slate-600">
+              {resetAsk.replaceCount > 0 ? <li>교체 {resetAsk.replaceCount}건</li> : null}
+              {resetAsk.editCount > 0 ? <li>수치 수정 {resetAsk.editCount}건</li> : null}
+              {resetAsk.colsChanged ? <li>지표 컬럼 구성</li> : null}
+              {resetAsk.settingsChanged ? <li>정렬 · Top N · 면적 연동 모드 · 검색어</li> : null}
+            </ul>
+
+            <p className="mt-2.5 text-[10.5px] leading-relaxed text-slate-400">
+              리셋 후 토스트의 <span className="font-black text-slate-500">되돌리기</span>로 한 번 복구할 수 있습니다.
+            </p>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setResetAsk(null)}
+                className="rounded-xl border border-slate-300 bg-white px-3.5 py-2 text-[12px] font-bold text-slate-600 transition hover:bg-slate-50 active:scale-95"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => { setResetAsk(null); performReset(); }}
+                className="rounded-xl bg-slate-900 px-3.5 py-2 text-[12px] font-black text-white transition hover:bg-slate-800 active:scale-95"
+              >
+                리셋 실행
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
     </div>
