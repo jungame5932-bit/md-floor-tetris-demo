@@ -2911,7 +2911,7 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
     <span
       role={canEdit ? 'button' : undefined}
       tabIndex={canEdit ? 0 : undefined}
-      title={canEdit ? '더블클릭하여 수정' : '파생 지표 (읽기 전용)'}
+      title={canEdit ? '클릭하여 수정' : '파생 지표 (읽기 전용)'}
       onClick={(ev) => { ev.stopPropagation(); if (canEdit) start(); }}
       onDoubleClick={(ev) => { ev.stopPropagation(); if (canEdit) start(); }}
       onKeyDown={(ev) => { if (canEdit && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); start(); } }}
@@ -3019,7 +3019,7 @@ function RankingDashboard({
         <h2 className="flex items-center gap-2 text-[11.5px] font-black text-slate-900">
           <span className="h-2 w-2 rounded-full bg-blue-700" />
           지표 대시보드
-          <span className="text-[10px] font-bold text-slate-400">지표 순위 · 수치 더블클릭 편집</span>
+          <span className="text-[10px] font-bold text-slate-400">지표 순위 · 수치 클릭 편집</span>
         </h2>
 
         <div className="flex items-center gap-1.5">
@@ -3209,7 +3209,8 @@ function App() {
     setToast(message);
     setToastAction(action || null);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    // 되돌리기 같은 시스템 토스트는 9초, 일반 안내도 2.6초는 남긴다 (지시서 Task 5).
+    // 되돌리기 같은 시스템 토스트는 9초, 일반 안내는 2.6초 (지시서 Task 5: 5~10초).
+    // 두 종류가 같은 모양이라 헷갈리므로 렌더에 data-toast-kind 로 구분을 남긴다.
     toastTimer.current = setTimeout(() => { setToast(null); setToastAction(null); }, action ? 9000 : 2600);
   }, []);
 
@@ -4324,7 +4325,12 @@ function App() {
       </div>
 
       {toast ? (
-        <div className={`fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift ${toastAction ? 'pointer-events-auto' : 'pointer-events-none'}`}>
+        <div
+          role="status"
+          aria-live="polite"
+          data-toast-kind={toastAction ? 'action' : 'notice'}
+          className={`fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift ${toastAction ? 'pointer-events-auto' : 'pointer-events-none'}`}
+        >
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white">
             <Icon name="Check" size={10} stroke={3} />
           </span>
