@@ -3215,11 +3215,11 @@ function App() {
 
   const notify = useCallback((message, action) => {
     if (action) {
-      // 되돌리기 같은 액션 토스트는 전용 슬롯에 9초 둔다.
+      // 되돌리기 같은 액션 토스트는 전용 슬롯에 5초 둔다 (사용자 결정, 11/17).
       // 일반 안내가 이 슬롯을 건드리지 않으므로 '입점' 같은 알림이 와도 사라지지 않는다.
       setActionToast({ message, action });
       if (actionTimer.current) clearTimeout(actionTimer.current);
-      actionTimer.current = setTimeout(() => setActionToast(null), 9000);
+      actionTimer.current = setTimeout(() => setActionToast(null), 5000);
       return;
     }
     // 일반 안내는 2.6초. action 토스트가 떠 있어도 그대로 유지된다.
@@ -3772,12 +3772,12 @@ function App() {
 
     setParseError(null);
     setParsing('도면을 분석 중입니다...');
+    // 스피너 최소 1.5초 노출 (사용자 결정, 11/17). 파싱이 즉시 끝나도 연출로 유지한다.
+    // 파싱 시작 전에 기다리므로 성공·실패 양쪽 경로가 같은 시간을 보장받는다.
+    await new Promise((r) => setTimeout(r, 1500));
     const startedAt = Date.now();
     try {
       const out = await analyzeFile(file);
-      // 스피너가 최소 1초는 보이게 한다 (지시서 Task 4-2)
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < 1000) await new Promise((r) => setTimeout(r, 1000 - elapsed));
 
       const regions = Array.isArray(out.regions) ? out.regions : [];
       // 모달에는 '실제로 만들어질 구역 수'를 보여야 한다. 원본 region 에는 도면 전체를 덮는
@@ -3799,8 +3799,6 @@ function App() {
       setUploadAsk({ name, zoneCount: effective, areaSum, labels, out, file });
     } catch (err) {
       const msg = String(err && err.message ? err.message : err);
-      const elapsed = Date.now() - startedAt;
-      if (elapsed < 1000) await new Promise((r) => setTimeout(r, 1000 - elapsed));
       setParseError(msg);
       notify('파일을 인식하지 못했습니다. 벡터 도면(SVG/DXF)을 사용해 주세요');
     } finally {
