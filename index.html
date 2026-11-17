@@ -4347,13 +4347,13 @@ function App() {
 
       {/* 토스트 스택 — 한 컨테이너에 모아 세로로 쌓는다.
           따로 띄우면 되돌리기와 일반 안내가 서로 겹친다.
-          bottom 48px: 대시보드 카드 하단 경계(뷰포트 바닥에서 41px)보다 위에 놓는다.
-          40px 로 두면 카드 테두리에 1px 걸친다 (실측). */}
+          bottom 40px: 대시보드 카드 하단 경계(뷰포트 바닥에서 41px)보다 아래에 놓아
+          토스트 밑변과 카드 테두리가 겹치지 않게 한다 (지시서 지정값). */}
       {toast || actionToast ? (
       <div
         role="status"
         aria-live="polite"
-        style={{ zIndex: 9999, bottom: '48px' }}
+        style={{ zIndex: 9999, bottom: '40px' }}
         className="pointer-events-none fixed left-1/2 flex -translate-x-1/2 flex-col items-center gap-2"
       >
       {toast ? (
