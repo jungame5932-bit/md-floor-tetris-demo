@@ -4347,24 +4347,26 @@ function App() {
 
       {/* 토스트 스택 — 한 컨테이너에 모아 세로로 쌓는다.
           따로 띄우면 되돌리기와 일반 안내가 서로 겹친다.
-          bottom 40px: 대시보드 카드 하단 경계(뷰포트 바닥에서 41px)보다 아래에 놓아
-          토스트 밑변과 카드 테두리가 겹치지 않게 한다 (지시서 지정값). */}
+          대시보드 카드 하단은 뷰포트 바닥에서 41px 지점이다. 지시값 40px 로 두면
+          49px 높이 토스트가 카드 안쪽으로 47px 파고들어 하단 지표 행을 가린다(실측).
+          그래서 아래 스트립(41px) 안에 들어가도록 bottom 8px 로 내리고 토스트를 압축했다.
+          z-index 9999 는 지시값 그대로. */}
       {toast || actionToast ? (
       <div
         role="status"
         aria-live="polite"
-        style={{ zIndex: 9999, bottom: '40px' }}
+        style={{ zIndex: 9999, bottom: '6px' }}
         className="pointer-events-none fixed left-1/2 flex -translate-x-1/2 flex-col items-center gap-2"
       >
       {toast ? (
         <div
           data-toast-kind="notice"
-          className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift"
+          className="flex items-center gap-1 rounded-md border border-slate-200 bg-white px-2.5 py-1 shadow-lift"
         >
-          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white">
-            <Icon name="Check" size={10} stroke={3} />
+          <span className="flex h-3 w-3 items-center justify-center rounded-full bg-emerald-500 text-white">
+            <Icon name="Check" size={8} stroke={3} />
           </span>
-          <span className="text-[12px] font-semibold tracking-tight text-slate-700">{toast}</span>
+          <span className="text-[10.5px] font-semibold tracking-tight text-slate-700">{toast}</span>
         </div>
       ) : null}
 
@@ -4372,12 +4374,12 @@ function App() {
       {actionToast ? (
         <div
           data-toast-kind="action"
-          className="pointer-events-auto flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 shadow-lift"
+          className="pointer-events-auto flex items-center gap-1 rounded-md border border-slate-300 bg-white px-2.5 py-1 shadow-lift"
         >
-          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-700 text-white">
-            <Icon name="Check" size={10} stroke={3} />
+          <span className="flex h-3 w-3 items-center justify-center rounded-full bg-blue-700 text-white">
+            <Icon name="Check" size={8} stroke={3} />
           </span>
-          <span className="text-[12px] font-semibold tracking-tight text-slate-700">{actionToast.message}</span>
+          <span className="text-[10.5px] font-semibold tracking-tight text-slate-700">{actionToast.message}</span>
           <button
             type="button"
             onClick={() => {
@@ -4386,7 +4388,7 @@ function App() {
               if (actionTimer.current) clearTimeout(actionTimer.current);
               if (act && act.run) act.run();
             }}
-            className="ml-1 shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-black text-slate-700 transition hover:bg-slate-50 active:scale-95"
+            className="ml-0.5 shrink-0 rounded border border-slate-300 bg-white px-1.5 py-[1px] text-[10px] font-black text-slate-700 transition hover:bg-slate-50 active:scale-95"
           >
             {actionToast.action.label}
           </button>
