@@ -2160,7 +2160,7 @@ function ZoneShape({
         }
       }}
     >
-      <title>{`${zone.id} · ${zone.locationType} · ${row.category}`}</title>
+      <title>{`${finalName} · ${row.category}\n월 ${moneyShort(row.salesCurr)} / ${growthText(row.growthRate)}\n${effText}\n${pyeongText}`}</title>
 
       <path
         className="zone-shape zone-poly"
@@ -2915,13 +2915,16 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
       onClick={(ev) => { ev.stopPropagation(); if (canEdit) start(); }}
       onDoubleClick={(ev) => { ev.stopPropagation(); if (canEdit) start(); }}
       onKeyDown={(ev) => { if (canEdit && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); start(); } }}
-      className={`inline-flex shrink-0 items-center gap-0.5 text-[10.5px] font-black tabular text-slate-900 ${
+      className={`group inline-flex shrink-0 items-center gap-0.5 text-[10.5px] font-black tabular text-slate-900 ${
         canEdit ? 'cursor-text rounded px-0.5 hover:bg-blue-50' : 'cursor-default opacity-80'
       }`}
     >
       {value}
+      {/* 연필은 '여기를 누르면 고칠 수 있다'는 유일한 시각 신호다.
+          평소엔 연한 회색(slate-300), 셀에 호버하면 진해진다(slate-600).
+          부모에 group 이 없으면 group-hover 가 죽어서 아무 반응이 없다. */}
       {canEdit ? (
-        <span className="text-slate-300 transition group-hover:text-slate-400" aria-hidden="true">
+        <span className="text-slate-300 transition group-hover:text-slate-600" aria-hidden="true">
           <Icon name="Pencil" size={9} stroke={2.4} />
         </span>
       ) : null}
@@ -3115,12 +3118,14 @@ function App() {
   const [zones, setZones] = useState(cloneBase);
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [hoveredZoneId, setHoveredZoneId] = useState(null);
+  // 토스트는 두 슬롯으로 나눈다. 되돌리기(action)는 일반 안내(notice)에 덮이지 않아야 한다.
   const [toast, setToast] = useState(null);
-  const [toastAction, setToastAction] = useState(null);
+  const [actionToast, setActionToast] = useState(null);
   // 리셋 확인 다이얼로그 — null 이면 닫힘
   const [resetAsk, setResetAsk] = useState(null);
   const undoRef = useRef(null);
   const toastTimer = useRef(null);
+  const actionTimer = useRef(null);
   const [plan, setPlan] = useState(null);       // { url, name, kind, analysis }
   const [analysis, setAnalysis] = useState(null); // { polys, regions, stats, pathD, regionD }
   const [parsing, setParsing] = useState(null);   // 진행 메시지
@@ -3198,7 +3203,10 @@ function App() {
 
   const brandOccupant = useCallback((name) => usedBy[name] || null, [usedBy]);
 
-  useEffect(() => () => { if (toastTimer.current) clearTimeout(toastTimer.current); }, []);
+  useEffect(() => () => {
+    if (toastTimer.current) clearTimeout(toastTimer.current);
+    if (actionTimer.current) clearTimeout(actionTimer.current);
+  }, []);
 
   // 언마운트 시 마지막 blob URL 해제
   useEffect(() => () => {
@@ -3206,12 +3214,18 @@ function App() {
   }, []);
 
   const notify = useCallback((message, action) => {
+    if (action) {
+      // 되돌리기 같은 액션 토스트는 전용 슬롯에 9초 둔다.
+      // 일반 안내가 이 슬롯을 건드리지 않으므로 '입점' 같은 알림이 와도 사라지지 않는다.
+      setActionToast({ message, action });
+      if (actionTimer.current) clearTimeout(actionTimer.current);
+      actionTimer.current = setTimeout(() => setActionToast(null), 9000);
+      return;
+    }
+    // 일반 안내는 2.6초. action 토스트가 떠 있어도 그대로 유지된다.
     setToast(message);
-    setToastAction(action || null);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    // 되돌리기 같은 시스템 토스트는 9초, 일반 안내는 2.6초 (지시서 Task 5: 5~10초).
-    // 두 종류가 같은 모양이라 헷갈리므로 렌더에 data-toast-kind 로 구분을 남긴다.
-    toastTimer.current = setTimeout(() => { setToast(null); setToastAction(null); }, action ? 9000 : 2600);
+    toastTimer.current = setTimeout(() => setToast(null), 2600);
   }, []);
 
   /** 구역을 잠깐 펄스로 강조 (스왑 피드백) */
@@ -3656,7 +3670,7 @@ function App() {
       return { patches: res.polys, regions: res.regions, stats: res.stats, kind: ext.toUpperCase(), raster: canvas };
     }
 
-    throw new Error('지원하지 않는 형식입니다 — DXF / SVG / PDF / PNG / JPG');
+    throw new Error('지원하지 않는 형식입니다 — DXF 또는 SVG 도면을 사용해 주세요');
   }, [renderPdfFirstPage]);
 
   /** 파싱 결과를 실제 화면 상태로 반영한다 (모달에서 '적용하기' 를 누른 뒤 호출) */
@@ -3742,10 +3756,17 @@ function App() {
 
     const name = file.name || '';
     const ext = (name.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
-    const isRasterFile = /^(png|jpe?g|webp|gif|bmp)$/i.test(ext) || /^image\/(png|jpeg|jpg|webp|gif|bmp)/.test(file.type || '');
-    // 지시서 Task 4-5 — 이미지 도면은 11/20 범위 밖. 기존 데이터를 건드리지 않고 안내만 한다.
+    const isRasterFile = /^(png|jpe?g|webp|gif|bmp)$/i.test(ext)
+      || /^image\/(png|jpeg|jpg|webp|gif|bmp)/.test(file.type || '');
+    const isPdfFile = ext === 'pdf' || file.type === 'application/pdf';
+    // 지시서 Task 4-5 — 이미지·PDF 도면은 11/20 범위 밖. 기존 데이터를 건드리지 않고 안내만 한다.
+    // 화면 안내문이 DXF·SVG 만 지원한다고 적혀 있으므로 드롭으로 들어온 PDF 도 같이 막는다.
     if (isRasterFile) {
       window.alert('현재 벡터 형식(SVG/DXF) 도면만 지원합니다.');
+      return;
+    }
+    if (isPdfFile) {
+      window.alert('PDF는 지원하지 않습니다. DXF 또는 SVG 도면을 사용해 주세요.');
       return;
     }
 
@@ -4324,32 +4345,47 @@ function App() {
 
       </div>
 
+      {/* 일반 안내 — 2.6초. 되돌리기 토스트보다 아래층에 둔다. */}
       {toast ? (
         <div
           role="status"
           aria-live="polite"
-          data-toast-kind={toastAction ? 'action' : 'notice'}
-          className={`fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift ${toastAction ? 'pointer-events-auto' : 'pointer-events-none'}`}
+          data-toast-kind="notice"
+          className="pointer-events-none fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift"
         >
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white">
             <Icon name="Check" size={10} stroke={3} />
           </span>
           <span className="text-[12px] font-semibold tracking-tight text-slate-700">{toast}</span>
-          {toastAction ? (
-            <button
-              type="button"
-              onClick={() => {
-                const act = toastAction;
-                setToast(null);
-                setToastAction(null);
-                if (toastTimer.current) clearTimeout(toastTimer.current);
-                if (act && act.run) act.run();
-              }}
-              className="ml-1 shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-black text-slate-700 transition hover:bg-slate-50 active:scale-95"
-            >
-              {toastAction.label}
-            </button>
-          ) : null}
+        </div>
+      ) : null}
+
+      {/* 되돌리기 — 9초. 일반 안내가 떠도 덮이지 않는다.
+          z-index 9999 / bottom 40px: 대시보드 패널 하단 경계 위로 띄워 겹치지 않게 한다. */}
+      {actionToast ? (
+        <div
+          role="status"
+          aria-live="polite"
+          data-toast-kind="action"
+          style={{ zIndex: 9999, bottom: '40px' }}
+          className="fixed left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 shadow-lift"
+        >
+          <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-700 text-white">
+            <Icon name="Check" size={10} stroke={3} />
+          </span>
+          <span className="text-[12px] font-semibold tracking-tight text-slate-700">{actionToast.message}</span>
+          <button
+            type="button"
+            onClick={() => {
+              const act = actionToast.action;
+              setActionToast(null);
+              if (actionTimer.current) clearTimeout(actionTimer.current);
+              if (act && act.run) act.run();
+            }}
+            className="ml-1 shrink-0 rounded-lg border border-slate-300 bg-white px-2 py-1 text-[11px] font-black text-slate-700 transition hover:bg-slate-50 active:scale-95"
+          >
+            {actionToast.action.label}
+          </button>
         </div>
       ) : null}
 
