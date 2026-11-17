@@ -32,7 +32,7 @@
 <script src="https://unpkg.com/@babel/standalone@7.26.4/babel.min.js" crossorigin></script>
 <script src="https://cdn.jsdelivr.net/npm/pdfjs-dist@3.11.174/build/pdf.min.js"></script>
 <style>
-  html, body { height: 100%; }
+  html, body { height: 100%; font-family: 'Pretendard', -apple-system, BlinkMacSystemFont, system-ui, sans-serif; }
   body {
     overflow: hidden;
     background: #F8FAFC;
@@ -1339,6 +1339,9 @@ const { useState, useMemo, useCallback, useEffect, useRef } = React;
  * ================================================================ */
 
 const VIEWBOX = { w: 1000, h: 680 };
+// 내장 도면은 실제로 그려지는 영역( x 70~920 · y 110~580 )에 맞춰 잘라 보여준다.
+// 업로드 도면은 letterbox 계산이 VIEWBOX 전체를 쓰므로 전체 뷰를 유지한다 (지시서 Task 7-3).
+const PLAN_TIGHT_VIEW = { x: -38, y: 100, w: 1076, h: 484 };
 
 const ZONES_BASE = [
   {
@@ -1357,7 +1360,7 @@ const ZONES_BASE = [
   },
   {
     id: 'Z-02', area: 20, status: '부진',
-    locationType: '북동측 사선 챔퍼(Chamfer)',
+    locationType: '북동측 사선 챔퍼',
     currentBrand: {
       name: '올드 베이커리', category: '베이커리',
       pyeongEfficiency: 980, commissionRate: 15,
@@ -1429,12 +1432,12 @@ const ZONES_BASE = [
 ];
 
 const CANDIDATES = [
-  { id: 'C-01', name: '런던베이글뮤지엄', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, profitRate: 19, growthRate: 34.2, tag: '오픈 30분 대기 · 평일 오전 비중 41%', initials: 'LB' },
-  { id: 'C-02', name: '노티드 월드', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, profitRate: 21, growthRate: 18.5, tag: '주중 재방문 38% · 객단가 1.8만', initials: 'KW' },
-  { id: 'C-03', name: '삐아프 쇼콜라', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, profitRate: 26, growthRate: 9.4, tag: '선물 세트 매출 비중 46%', initials: 'PF' },
-  { id: 'C-04', name: '땀땀 (TamTam)', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, profitRate: 15, growthRate: -2.1, tag: '시간당 회전 2.4회', initials: 'TT' },
-  { id: 'C-05', name: '카멜커피', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, profitRate: 18, growthRate: 24.8, tag: 'SNS 언급 주 1,200건', initials: 'CC' },
-  { id: 'C-06', name: '트러플 아티장 델리', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, profitRate: 28, growthRate: 6.7, tag: '주류 동반 구매 31%', initials: 'TD' },
+  { id: 'C-01', name: '런던베이글뮤지엄', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, profitRate: 19, growthRate: 34.2, tag: '평일 오전 매출 비중 41%' },
+  { id: 'C-02', name: '노티드 월드', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, profitRate: 21, growthRate: 18.5, tag: '재방문율 38% · 객단가 1.8만' },
+  { id: 'C-03', name: '삐아프 쇼콜라', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, profitRate: 26, growthRate: 9.4, tag: '선물 세트 매출 비중 46%' },
+  { id: 'C-04', name: '땀땀 (TamTam)', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, profitRate: 15, growthRate: -2.1, tag: '시간당 회전 2.4회' },
+  { id: 'C-05', name: '카멜커피', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, profitRate: 18, growthRate: 24.8, tag: '테이크아웃 비중 58%' },
+  { id: 'C-06', name: '트러플 아티장 델리', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, profitRate: 28, growthRate: 6.7, tag: '주류 동반 구매 31%' },
 ];
 
 const CAT_TAG = {
@@ -1644,7 +1647,9 @@ function geometryOfPts(pts) {
   return {
     bbox: { x: x0, y: y0, w, h },
     center: { x: x0 + w / 2, y: y0 + h / 2 },
-    labelWidth: Math.max(28, Math.min(w * 0.94, 240)),
+    // 하한을 28px 로 두면 폭 19px 짜리 작은 칸에서도 라벨 박스가 칸보다 넓어져
+    // 글자가 도형 밖으로 삐진다. 실제 폭을 그대로 넘겨 라벨이 스스로 줄어들게 한다.
+    labelWidth: Math.max(0, Math.min(w * 0.94, 240)),
     labelHeight: Math.max(0, h * 0.92),
   };
 }
@@ -1765,7 +1770,7 @@ function zonesFromRegions(regions, brandPool, totalPyeong) {
       // 라벨은 다각형 무게중심이 아니라 bbox 중심에 놉는다. 오목한 폴리곤은
       // 무게중심이 도형 밖으로 나가거나 한쪽으로 치우쳐 글자가 삐진다.
       center: { x: r.bbox.x + r.bbox.w / 2, y: r.bbox.y + r.bbox.h / 2 },
-      labelWidth: Math.max(28, Math.min(r.bbox.w * 0.94, 240)),
+      labelWidth: Math.max(0, Math.min(r.bbox.w * 0.94, 240)),
       labelHeight: Math.max(0, r.bbox.h * 0.92),
       currentBrand: null,
       isReplaced: false,
@@ -2035,12 +2040,13 @@ function ZoneShape({
           : '#FFFFFF';
   // 자동 인식 구획은 원본 이미지 위에 파란 구획선으로 얹는다 (지시서 검증 3번).
   // 채움은 거의 투명하게 두고 테두리만 파랑으로 살린다.
+  // 빨강은 '역신장'과 '삭제'에만 쓴다 (지시서 Task 7-1). 선택·드롭 표시는 네이비 계열.
   const stroke = dropMode
-    ? '#E60012'
+    ? '#4C1D95'
     : replaced
       ? '#059669'
       : hovered
-        ? '#E60012'
+        ? '#1E3A8A'
         : warning
           ? '#F59E0B'
           : zone.auto
@@ -2053,58 +2059,40 @@ function ZoneShape({
     : (ghost ? (bgHidden ? 0.9 : 0.62) : 1);
 
   const { x: cx, y: cy } = zone.center;
-  // 지시서 P1-2: 모든 구역 라벨은 12px 이상. 소구역은 2행(브랜드명+매출)만 상시 노출하고
-  // 나머지 2행은 선택했을 때만 펼쳐 위계를 나눈다.
+  // 지시서 Task 2 — 4행(브랜드명 · 매출/신장율 · 평효율 · 평수)을 모든 구역에서 상시 노출한다.
+  // 예전에는 미선택 소구역이 2행으로 접혀 Z-04 의 평효율 줄이 아예 사라졌다.
+  // 행 삭제·말줄임은 금지 — 좁은 칸은 글자 폭을 압축하고, 20평 미만은 그룹을 0.75 로 줄인다.
   const fsName = compact ? 12 : small ? 12.5 : 13.5;
-  const fsSub = 12;
-  const fsEff = 12;
-  const fsPyeong = 12;
-  const lh = compact ? 15 : small ? 15.5 : 16.5;
-  const dense = !compact || selected;
-  const lines = dense ? 4 : 2;
-  // 구획 높이가 라벨 줄 수를 감당하지 못하면 글자가 도형 밖으로 나간다.
-  // 자동 인식 도면은 칸이 작아서 이 판정이 필요하다.
-  const boxH = typeof zone.labelHeight === 'number' && zone.labelHeight > 0
-    ? zone.labelHeight
-    : lh * (lines + 1);
-  const fits4 = dense && boxH >= lh * 4;
-  const fits2 = boxH >= lh * 2;
-  const shownLines = fits4 ? 4 : fits2 ? 2 : 1;
-  const top = cy - (lh * (shownLines - 1)) / 2;
-  const y1 = top;
-  const y2 = top + lh;
-  const y3 = top + lh * 2;
-  const y4 = top + lh * 3;
+  const fsSub = Math.max(10, Math.min(12, fsName * 0.92));
+  const lh = fsName * 1.42;
+  // 20평 미만 소구역은 텍스트 그룹 전체를 0.75 로 축소해 4행을 유지한다.
+  // 12px x 0.75 = 9px 로 최소 가독선 위에 남는다.
+  const labelScale = typeof zone.area === 'number' && zone.area > 0 && zone.area < 20 ? 0.75 : 1;
+  const blockH = lh * 3 + fsName * 1.25;
+  const lineTop = cy - blockH / 2 + fsName * 0.98;
+  const y1 = lineTop;
+  const y2 = lineTop + lh;
+  const y3 = lineTop + lh * 2;
+  const y4 = lineTop + lh * 3;
+  // 배지(NEW·개편요망)는 폭 34~54px 라 좁은 칸에서는 밖으로 나간다.
+  const showBadge = !(typeof zone.labelWidth === 'number') || zone.labelWidth >= 58;
+  // 텍스트 그룹을 중심 기준으로 축소한다 (transform-origin: center 등가)
+  const labelTransform = labelScale === 1
+    ? undefined
+    : `translate(${cx} ${cy}) scale(${labelScale}) translate(${-cx} ${-cy})`;
 
-  // 글자 폭을 12px 로 고정하면 좌표계가 좁은 구획에서 박스가 강제로 넘진다.
-  // 박스에 들어가는 글자 수를 먼저 구하고, 그 수로 이름을 잘라 쓴다.
-  // 그래도 2글자도 안 들어가면 라벨을 숨기고 title·aria 로만 남긴다.
-  const nameFs = 12;
-  // 한글은 전각(1.0em), 영문·숫자는 0.55em 정도다. 0.62 하나로 잡으면 한글 이름이
-  // 계산보다 넓게 나와 좌우로 삐진다.
+  // 한글은 전각(1.0em), 영문·숫자는 0.56em 로 잡아 실제 폭을 계산한다.
   const charEm = (ch) => (/[\uac00-\ud7a3\u3131-\u318e]/.test(ch) ? 1.0 : ch === ' ' ? 0.32 : 0.56);
   const textEm = (s) => Array.from(s).reduce((acc, ch) => acc + charEm(ch), 0);
-  const fitChars = Math.max(2, Math.floor((zone.labelWidth - 4) / (nameFs * 0.95)));
-  const maxChars = fitChars;
-  const shownName = row.name.length > maxChars
-    ? `${row.name.slice(0, Math.max(1, maxChars - 1))}…`
-    : row.name;
-  // 글자수로 자른 뒤에도 실제 폭이 남으면 한 글자씩 더 줄인다
-  let finalName = shownName;
-  while (finalName.length > 2 && textEm(finalName) * nameFs > zone.labelWidth - 2) {
-    finalName = `${finalName.slice(0, Math.max(1, finalName.length - 2))}…`;
-  }
-  // 매출·신장율 2행도 구역 폭을 넘으면 줄인다
+  const boxW = Math.max(0, typeof zone.labelWidth === 'number' ? zone.labelWidth : 200);
+  // 말줄임 대신 textLength 로 압축한다. scale 이 걸린 칸은 그만큼 폭 여유가 생긴다.
+  const fitW = Math.max(6, (boxW - 4) / labelScale);
+  const fitTextLength = (str, fs) => (textEm(str) * fs > fitW ? fitW : undefined);
+
+  const finalName = row.name;
   const subText = `월 ${moneyShort(row.salesCurr)} / ${growthText(row.growthRate)}`;
-  const subFs = Math.max(10, Math.min(fsSub, (zone.labelWidth - 2) / Math.max(1, textEm(subText))));
-  const subFits = textEm(subText) * subFs <= zone.labelWidth;
-  // '평효율 2,200만/평' 줄도 좁은 구역에서 좌우로 삐질 수 있어 폭에 맞춰 줄인다
   const effText = `평효율 ${man(Math.round(row.efficiency / 1e4))}만/평`;
-  const effFs = Math.max(10, Math.min(fsEff, (zone.labelWidth - 2) / Math.max(1, textEm(effText))));
-  const effFits = textEm(effText) * effFs <= zone.labelWidth;
-  // 줄 수와 폭을 둘 다 만족할 때만 해당 행을 그린다
-  const showEff = shownLines >= 4 && effFits;
-  const showPyeong = shownLines >= 4 && zone.labelWidth >= 64;
+  const pyeongText = `${row.pyeong}평 · ${zone.id}`;
   const badgeY = y1 - fsName - 3;
   const growth = row.growthRate;
   const gColor = growthColor(growth);
@@ -2186,7 +2174,7 @@ function ZoneShape({
       />
 
       {selected ? (
-        <path d={zone.path} fill="none" stroke="#E60012" strokeWidth="2.4" strokeOpacity="0.85" strokeLinejoin="round" />
+        <path d={zone.path} fill="none" stroke="#1E3A8A" strokeWidth="2.4" strokeOpacity="0.9" strokeLinejoin="round" />
       ) : null}
 
       {selected && zone.auto && Array.isArray(zone.pts) && zone.pts.length >= 3 ? (
@@ -2238,8 +2226,8 @@ function ZoneShape({
         </g>
       ) : null}
 
-      {dropMode ? (
-        <text x={cx} y={badgeY - 6} textAnchor="middle" fill="#E60012" fontSize={12} fontWeight="900" fontFamily="Pretendard, sans-serif">
+      {!showBadge ? null : dropMode ? (
+        <text x={cx} y={badgeY - 6} textAnchor="middle" fill="#4C1D95" fontSize={12} fontWeight="900" fontFamily="Pretendard, sans-serif">
           {dragKind === 'zone' ? '⇄ 자리 교환' : '＋ 여기에 입점'}
         </text>
       ) : replaced ? (
@@ -2256,30 +2244,79 @@ function ZoneShape({
         </g>
       ) : null}
 
-      <text x={cx} y={y1} textAnchor="middle" fill="#0F172A" fontSize={nameFs} fontWeight="900" fontFamily="Pretendard, sans-serif">
-        {finalName}
-      </text>
+      {/* 4행 라벨 — 말줄임·행 삭제 없이 항상 그린다.
+          20평 미만 칸은 그룹 전체를 0.75 로 축소한다 (지시서 Task 2 / B18).
+          흰 테두리(paint-order: stroke)를 깔아 이웃 구역 경계선 위에서도 읽힌다. */}
+      <g transform={labelTransform}>
+        <text
+          x={cx}
+          y={y1}
+          textAnchor="middle"
+          fill="#0F172A"
+          fontSize={fsName}
+          fontWeight="900"
+          fontFamily="Pretendard, sans-serif"
+          stroke="#FFFFFF"
+          strokeWidth={3}
+          paintOrder="stroke"
+          textLength={fitTextLength(finalName, fsName)}
+          lengthAdjust="spacingAndGlyphs"
+        >
+          {finalName}
+        </text>
 
-      {shownLines >= 2 && subFits ? (
-        <text x={cx} y={y2} textAnchor="middle" fontSize={subFs} fontWeight="800" fontFamily="Pretendard, sans-serif">
+        <text
+          x={cx}
+          y={y2}
+          textAnchor="middle"
+          fontSize={fsSub}
+          fontWeight="800"
+          fontFamily="Pretendard, sans-serif"
+          stroke="#FFFFFF"
+          strokeWidth={2.5}
+          paintOrder="stroke"
+          textLength={fitTextLength(subText, fsSub)}
+          lengthAdjust="spacingAndGlyphs"
+        >
           <tspan fill="#334155">{`월 ${moneyShort(row.salesCurr)}`}</tspan>
           <tspan fill="#94A3B8" fontWeight="600">{' / '}</tspan>
           <tspan fill={gColor}>{growthText(growth)}</tspan>
         </text>
-      ) : null}
 
-      {showEff ? (
-        <text x={cx} y={y3} textAnchor="middle" fill="#475569" fontSize={effFs} fontWeight="700" fontFamily="Pretendard, sans-serif">
+        <text
+          x={cx}
+          y={y3}
+          textAnchor="middle"
+          fill="#475569"
+          fontSize={fsSub}
+          fontWeight="700"
+          fontFamily="Pretendard, sans-serif"
+          stroke="#FFFFFF"
+          strokeWidth={2.5}
+          paintOrder="stroke"
+          textLength={fitTextLength(effText, fsSub)}
+          lengthAdjust="spacingAndGlyphs"
+        >
           {effText}
         </text>
-      ) : null}
 
-      {showPyeong ? (
-        <text x={cx} y={y4} textAnchor="middle" fontSize={fsPyeong} fontWeight="700" fontFamily="Pretendard, sans-serif">
+        <text
+          x={cx}
+          y={y4}
+          textAnchor="middle"
+          fontSize={fsSub}
+          fontWeight="700"
+          fontFamily="Pretendard, sans-serif"
+          stroke="#FFFFFF"
+          strokeWidth={2.5}
+          paintOrder="stroke"
+          textLength={fitTextLength(pyeongText, fsSub)}
+          lengthAdjust="spacingAndGlyphs"
+        >
           <tspan fill="#0F172A">{`${row.pyeong}평`}</tspan>
           <tspan fill="#94A3B8" fontWeight="600">{` · ${zone.id}`}</tspan>
         </text>
-      ) : null}
+      </g>
     </g>
   );
 }
@@ -2304,7 +2341,7 @@ function FloorPlan({
   const bgHidden = !showBg;
 
   return (
-    <svg viewBox={`0 0 ${VIEWBOX.w} ${VIEWBOX.h}`} className={`h-full w-full${bgHidden ? ' focus-mode' : ''}`} preserveAspectRatio="xMidYMid meet"
+    <svg viewBox={uploaded ? `0 0 ${VIEWBOX.w} ${VIEWBOX.h}` : `${PLAN_TIGHT_VIEW.x} ${PLAN_TIGHT_VIEW.y} ${PLAN_TIGHT_VIEW.w} ${PLAN_TIGHT_VIEW.h}`} className={`h-full w-full${bgHidden ? ' focus-mode' : ''}`} preserveAspectRatio="xMidYMid meet"
       role="img" aria-label="잠실점 지하 1층 식품관 평면도">
       <defs>
         <filter id="soft-shadow" x="-8%" y="-8%" width="116%" height="116%">
@@ -2508,13 +2545,6 @@ function CandidateCard({ brand, selected, usedCount, occupiedZone, onSelect, onD
       }`}
     >
       <div className="flex min-w-0 items-center gap-2.5">
-        <div className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border text-[11px] font-black ${
-          locked
-            ? 'border-slate-200 bg-slate-100 text-slate-400'
-            : selected ? 'border-rose-200 bg-white text-rose-700' : 'border-slate-200 bg-slate-100 text-slate-700'
-        }`}>
-          {brand.initials}
-        </div>
         <div className="min-w-0">
           <div className="flex items-center gap-1.5">
             <span className={`truncate text-xs font-black tracking-tight ${locked ? 'text-slate-500' : 'text-slate-900'}`}>{brand.name}</span>
@@ -2577,7 +2607,7 @@ function BrandRow({ row, selected, sortKey, onSelect, onDragStartZone, onDragEnd
       }}
       onDragEnd={onDragEndZone}
       className={`cursor-grab rounded-xl border p-2.5 transition active:cursor-grabbing ${
-        selected ? 'border-rose-400 bg-rose-50/60 ring-1 ring-rose-200' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
+        selected ? 'border-blue-700 bg-blue-50/50 ring-1 ring-blue-200' : 'border-slate-200 bg-white hover:border-slate-300 hover:bg-slate-50'
       }`}
     >
       <div className="flex items-center justify-between gap-2">
@@ -2720,9 +2750,6 @@ function BrandListPanel({
             )}
           </div>
 
-          <div className="shrink-0 border-t border-slate-100 px-3 py-2 text-[10px] font-semibold text-slate-400">
-            항목을 클릭하면 도면에서 강조되고, 도면 구역 위로 끌어다 놓으면 자리가 바뀝니다
-          </div>
         </div>
       ) : (
         <div className="flex min-h-0 flex-1 flex-col">
@@ -2784,9 +2811,6 @@ function BrandListPanel({
               )}
             </div>
           </div>
-          <div className="shrink-0 border-t border-slate-100 px-3 py-2 text-[10px] font-semibold text-slate-400">
-            카드를 도면 구역에 끌어다 놓거나, 카드 선택 후 구역을 클릭하세요
-          </div>
         </div>
       )}
     </div>
@@ -2811,6 +2835,8 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
     : metric && metric.unit === 'wonPerPyeong' ? 1e4
       : 1;
 
+  // 지시서 Task 7-2 — 편집 진입이 구역 선택으로 번지면 안 된다.
+  // start 는 onSelectZone 을 부르지 않고, 셀 클릭 이벤트도 상위로 전파하지 않는다.
   const start = () => {
     const shown = metricEditValue(metricKey, row);
     originRef.current = Number(String(shown).replace(/,/g, '')) * editScale;
@@ -2818,7 +2844,6 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
     setEditing(true);
     setInvalid(false);
     setErrorText('');
-    if (onSelectZone) onSelectZone();
   };
 
   React.useEffect(() => {
@@ -2890,11 +2915,16 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
       onClick={(ev) => { ev.stopPropagation(); if (canEdit) start(); }}
       onDoubleClick={(ev) => { ev.stopPropagation(); if (canEdit) start(); }}
       onKeyDown={(ev) => { if (canEdit && (ev.key === 'Enter' || ev.key === ' ')) { ev.preventDefault(); start(); } }}
-      className={`shrink-0 text-[10.5px] font-black tabular text-slate-900 ${
-        canEdit ? 'cursor-text rounded px-0.5 hover:bg-rose-50' : 'cursor-default opacity-80'
+      className={`inline-flex shrink-0 items-center gap-0.5 text-[10.5px] font-black tabular text-slate-900 ${
+        canEdit ? 'cursor-text rounded px-0.5 hover:bg-blue-50' : 'cursor-default opacity-80'
       }`}
     >
       {value}
+      {canEdit ? (
+        <span className="text-slate-300 transition group-hover:text-slate-400" aria-hidden="true">
+          <Icon name="Pencil" size={9} stroke={2.4} />
+        </span>
+      ) : null}
     </span>
   );
 }
@@ -2958,7 +2988,7 @@ function RankingColumn({
               </span>
               <span className="min-w-0 flex-1 truncate text-[10px] font-bold text-slate-700">
                 {row.name}
-                {row.edited ? <span className="ml-1 inline-block h-1 w-1 rounded-full bg-rose-500 align-middle" title="수정됨" /> : null}
+                {row.edited ? <span className="ml-1 inline-block h-1 w-1 rounded-full bg-blue-700 align-middle" title="수정됨" /> : null}
               </span>
               <InlineValue
                 row={row}
@@ -3095,6 +3125,8 @@ function App() {
   const [analysis, setAnalysis] = useState(null); // { polys, regions, stats, pathD, regionD }
   const [parsing, setParsing] = useState(null);   // 진행 메시지
   const [parseError, setParseError] = useState(null);
+  // 업로드 6단계 플로우 (지시서 Task 4) — 파싱 결과를 모달로 확인한 뒤 적용한다
+  const [uploadAsk, setUploadAsk] = useState(null); // { name, zoneCount, areaSum, labels, out, file }
   const [showZones, setShowZones] = useState(true);
   const [showTrace, setShowTrace] = useState(true);
   const [showBg, setShowBg] = useState(true);     // 원본 도면 배경 표시 여부
@@ -3170,7 +3202,8 @@ function App() {
     setToast(message);
     setToastAction(action || null);
     if (toastTimer.current) clearTimeout(toastTimer.current);
-    toastTimer.current = setTimeout(() => { setToast(null); setToastAction(null); }, action ? 7000 : 1900);
+    // 되돌리기 같은 시스템 토스트는 9초, 일반 안내도 2.6초는 남긴다 (지시서 Task 5).
+    toastTimer.current = setTimeout(() => { setToast(null); setToastAction(null); }, action ? 9000 : 2600);
   }, []);
 
   /** 구역을 잠깐 펄스로 강조 (스왑 피드백) */
@@ -3462,8 +3495,19 @@ function App() {
     });
     setDragZoneId(null);
     setSelectedZoneId(toId);
-    // 자리 교환은 교체 건으로만 집계한다 — 매출이 같아도 수정 건으로 중복 집계하지 않는다
-    setEditedZones((prev) => { const n = { ...prev }; delete n[fromId]; delete n[toId]; return n; });
+    // 수정 상태는 구역이 아니라 브랜드에 딸린 정보다 — 자리 교환 때 브랜드와 함께 옮긴다.
+    // 여기서 그냥 지워버리면 매출을 고친 브랜드를 다른 구역과 바꾼 순간
+    // '수정됨' 배지와 상단 수정 건수가 증발한다 (지시서 Task 1 / B21).
+    setEditedZones((prev) => {
+      const fromEdited = Boolean(prev[fromId]);
+      const toEdited = Boolean(prev[toId]);
+      const n = { ...prev };
+      delete n[fromId];
+      delete n[toId];
+      if (toEdited) n[fromId] = true;
+      if (fromEdited) n[toId] = true;
+      return n;
+    });
     pulse(toId);
     if (!opts.silent) notify(`${fromId} ⇄ ${toId} 자리 교환`);
   }, [rebaseBrand, notify, pulse]);
@@ -3596,64 +3640,129 @@ function App() {
     throw new Error('지원하지 않는 형식입니다 — DXF / SVG / PDF / PNG / JPG');
   }, [renderPdfFirstPage]);
 
+  /** 파싱 결과를 실제 화면 상태로 반영한다 (모달에서 '적용하기' 를 누른 뒤 호출) */
+  const applyParsedPlan = useCallback(async ({ file, out }) => {
+    // 배경 이미지 URL
+    if (planUrlRef.current) URL.revokeObjectURL(planUrlRef.current);
+    let url = null;
+    if (out.svgText) {
+      url = URL.createObjectURL(new Blob([out.svgText], { type: 'image/svg+xml' }));
+    } else if (out.raster) {
+      const blob = await new Promise((res) => out.raster.toBlob(res, 'image/png'));
+      url = URL.createObjectURL(blob);
+    } else if (isRasterPlan(file)) {
+      url = URL.createObjectURL(file);
+    }
+    planUrlRef.current = url;
+
+    const pathD = window.PlanParser.toPathData(out.patches, 2);
+    const regionD = window.PlanParser.toPathData(out.regions, 2);
+
+    setAnalysis({ ...out, pathD, regionD });
+    setPlan({ url, name: file.name, kind: out.kind });
+    setShowZones(true);
+    setShowTrace(!!pathD);
+
+    const derived = zonesFromRegions(out.regions, ZONES_BASE.map((z) => z.currentBrand), PLAN_TOTAL_PYEONG);
+    // 적용 전 스냅샷 — 실패 토스트의 '되돌리기' 로 한 번 복구한다 (지시서 Task 4-6)
+    const before = {
+      zones: cloneZoneList(zones),
+      planZones: planZones ? cloneZoneList(planZones) : null,
+      plan,
+      analysis,
+      baseline,
+      url: planUrlRef.current,
+    };
+    if (derived && derived.length >= 2) {
+      setPlanZones(cloneZoneList(derived));
+      setZones(cloneZoneList(derived));
+      setBaseline(metricsOf(derived));
+      setSelectedZoneId(null);
+      setEditedZones({});
+      notify(`도면이 적용되었습니다 · 구획 ${derived.length}개`, {
+        label: '되돌리기 ↺',
+        run: () => {
+          setZones(before.zones);
+          setPlanZones(before.planZones);
+          setPlan(before.plan);
+          setAnalysis(before.analysis);
+          setBaseline(before.baseline);
+          setSelectedZoneId(null);
+          setEditedZones({});
+          notify('직전 도면으로 되돌렸습니다');
+        },
+      });
+    } else {
+      setZones([]);
+      setPlanZones([]);
+      setBaseline({ rev: 0, profit: 0, pyeong: 0, eff: 0, profitRate: 0 });
+      setSelectedZoneId(null);
+      setEditedZones({});
+      setShowRegions(true);
+      notify(`${file.name} · 구획을 찾지 못했습니다`, {
+        label: '되돌리기 ↺',
+        run: () => {
+          setZones(before.zones);
+          setPlanZones(before.planZones);
+          setPlan(before.plan);
+          setAnalysis(before.analysis);
+          setBaseline(before.baseline);
+          notify('직전 도면으로 되돌렸습니다');
+        },
+      });
+    }
+  }, [zones, planZones, plan, analysis, baseline, notify]);
+
+  /**
+   * 업로드 1~4단계 — 파일을 읽어 파싱하고, 결과를 모달로 확인시킨다.
+   * 실제 덮어쓰기는 applyParsedPlan 이고, 이 함수는 상태를 건드리지 않는다.
+   */
   const loadPlanFile = useCallback(async (file) => {
     if (!file) return;
     if (file.size > 40 * 1024 * 1024) { notify('파일이 40MB를 넘습니다 — 더 작은 도면을 쓰세요'); return; }
 
+    const name = file.name || '';
+    const ext = (name.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
+    const isRasterFile = /^(png|jpe?g|webp|gif|bmp)$/i.test(ext) || /^image\/(png|jpeg|jpg|webp|gif|bmp)/.test(file.type || '');
+    // 지시서 Task 4-5 — 이미지 도면은 11/20 범위 밖. 기존 데이터를 건드리지 않고 안내만 한다.
+    if (isRasterFile) {
+      window.alert('현재 벡터 형식(SVG/DXF) 도면만 지원합니다.');
+      return;
+    }
+
     setParseError(null);
-    setParsing('도면 준비 중…');
+    setParsing('도면을 분석 중입니다...');
+    const startedAt = Date.now();
     try {
-      // 래스터(JPG/PNG)는 백엔드 CV 파이프라인을 먼저 시도한다.
-      // 백엔드가 없으면 아래 analyzeFile 의 클라이언트 추적으로 자연 폴백된다.
-      // 래스터(JPG/PNG)는 브라우저에서 직접 구획을 뽑는다.
-      // 백엔드가 없는 정적 호스팅에서도 같은 결과가 나오도록 하기 위함이다.
       const out = await analyzeFile(file);
+      // 스피너가 최소 1초는 보이게 한다 (지시서 Task 4-2)
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 1000) await new Promise((r) => setTimeout(r, 1000 - elapsed));
 
-      // 배경 이미지 URL
-      if (planUrlRef.current) URL.revokeObjectURL(planUrlRef.current);
-      let url = null;
-      if (out.svgText) {
-        url = URL.createObjectURL(new Blob([out.svgText], { type: 'image/svg+xml' }));
-      } else if (out.raster) {
-        const blob = await new Promise((res) => out.raster.toBlob(res, 'image/png'));
-        url = URL.createObjectURL(blob);
-      } else if (isRasterPlan(file)) {
-        // 자동 인식 경로: 원본 이미지를 그대로 배경으로 깔고 폴리곤만 위에 올린다
-        url = URL.createObjectURL(file);
-      }
-      planUrlRef.current = url;
+      const regions = Array.isArray(out.regions) ? out.regions : [];
+      // 모달에는 '실제로 만들어질 구역 수'를 보여야 한다. 원본 region 에는 도면 전체를 덮는
+      // 외벽 사각형이 섞여 있어서 zonesFromRegions 가 그걸 걸러낸다 (7 → 6).
+      const preview = zonesFromRegions(out.regions, ZONES_BASE.map((z) => z.currentBrand), PLAN_TOTAL_PYEONG);
+      const effective = preview && preview.length ? preview.length : regions.length;
+      const areaSum = regions.reduce((acc, r) => acc + (Number(r.area) || 0), 0);
+      // 인식된 원본 라벨 — 실제 구역으로 채택된 것만 나열한다 (걸러진 외벽 제외).
+      // 라벨 정보가 없으면 '알 수 없는 구역 N' 으로 대체한다 (지시서 Task 4-3).
+      const keptRegions = Array.isArray(preview) && preview.length ? preview : regions;
+      const labels = keptRegions.slice(0, 40).map((r, i) => {
+        // 우리 파이프라인은 도면의 원본 텍스트를 읽지 않는다(OCR 제거).
+        // SVG/DXF 에서 name·id 를 실어오는 경우만 그대로 쓰고, 없으면 지시서의 Fallback 을 쓴다.
+        const raw = (r && (r.name || r.label)) || null;
+        return raw ? String(raw) : `알 수 없는 구역 ${i + 1}`;
+      });
 
-      const pathD = window.PlanParser.toPathData(out.patches, 2);
-      const regionD = window.PlanParser.toPathData(out.regions, 2);
-
-      setAnalysis({ ...out, pathD, regionD });
-      setPlan({ url, name: file.name, kind: out.kind });
-      setShowZones(true);
-      setShowTrace(!!pathD);
-
-      // 도면에서 읽은 구획으로 구역을 새로 세운다 (기존 목업을 걷어낸다)
-      const derived = zonesFromRegions(out.regions, ZONES_BASE.map((z) => z.currentBrand), PLAN_TOTAL_PYEONG);
-      if (derived && derived.length >= 2) {
-        setPlanZones(cloneZoneList(derived));
-        setZones(cloneZoneList(derived));
-        setBaseline(metricsOf(derived));
-        setSelectedZoneId(null);
-        setEditedZones({});
-        notify(`${file.name} · 구획 ${derived.length}개 인식`);
-      } else {
-        // 구획을 못 찾았는데 목업 구역을 남기면 엉뚱한 도면 위에 옛 구역이 겹친다.
-        // 구역을 비우고 감지된 닫힌 영역을 보여줘서 무엇이 잡혔는지 확인하게 한다.
-        setZones([]);
-        setPlanZones([]);
-        setBaseline({ rev: 0, profit: 0, pyeong: 0, eff: 0, profitRate: 0 });
-        setSelectedZoneId(null);
-        setEditedZones({});
-        setShowRegions(true);
-        notify(`${file.name} · 닫힌 구획을 찾지 못했습니다 (영역 표시를 확인)`);
-      }
+      setParsing(null);
+      setUploadAsk({ name, zoneCount: effective, areaSum, labels, out, file });
     } catch (err) {
-      setParseError(String(err && err.message ? err.message : err));
-      notify('도면 해석 실패 — 형식을 확인하세요');
+      const msg = String(err && err.message ? err.message : err);
+      const elapsed = Date.now() - startedAt;
+      if (elapsed < 1000) await new Promise((r) => setTimeout(r, 1000 - elapsed));
+      setParseError(msg);
+      notify('파일을 인식하지 못했습니다. 벡터 도면(SVG/DXF)을 사용해 주세요');
     } finally {
       setParsing(null);
     }
@@ -3757,9 +3866,10 @@ function App() {
       || rankLimit !== 3 || rankDir !== 'desc' || areaMode !== 'efficiency' || query !== '';
     const total = replaceCount + editCount + (colsChanged ? 1 : 0) + (settingsChanged ? 1 : 0);
 
-    if (total === 0) { performReset(); return; }
+    // 변경 0건이면 되돌릴 것이 없다 — 눌렀는데 아무 반응이 없으면 고장으로 보인다.
+    if (total === 0) { notify('변경 사항이 없습니다 — 되돌릴 내용이 없습니다'); return; }
     setResetAsk({ replaceCount, editCount, colsChanged, settingsChanged, total });
-  }, [zones, editedZones, columns, sortKey, sortDir, rankLimit, rankDir, areaMode, query, performReset]);
+  }, [zones, editedZones, columns, sortKey, sortDir, rankLimit, rankDir, areaMode, query, performReset, notify]);
 
   const rows = useMemo(
     () => storeRows(zones).map((r) => ({ ...r, edited: Boolean(editedZones[r.zoneId]) })),
@@ -3872,12 +3982,12 @@ function App() {
       <div className="flex min-h-0 flex-1 gap-3 overflow-hidden p-3">
         {/* 좌: 도면 + 지표 대시보드 */}
         <div className="flex min-h-0 min-w-0 flex-[1_1_73%] flex-col gap-3">
-          <div className="cad-canvas-bg flex min-h-0 flex-[7] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
+          <div className="cad-canvas-bg flex min-h-0 flex-[8] flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/90 px-4 py-2 text-xs font-semibold text-slate-500 backdrop-blur-sm">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="flex min-w-0 items-center gap-1.5 font-bold text-slate-700">
                   <span className={`h-2 w-2 shrink-0 rounded-full ${plan ? 'bg-rose-500' : 'bg-emerald-500'}`} />
-                  <span className="truncate">{plan ? plan.name : 'LOTTE-JS-B1-ASYMMETRIC.svg'}</span>
+                  <span className="truncate">{plan ? plan.name : '잠실점 B1 기본 도면.svg'}</span>
                 </span>
                 <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
                   {plan ? plan.kind : '내장 도면'}
@@ -3889,7 +3999,7 @@ function App() {
                   ref={fileRef}
                   id="plan-file-input"
                   type="file"
-                  accept=".dxf,.svg,.pdf,.png,.jpg,.jpeg,image/svg+xml,application/pdf,image/png,image/jpeg"
+                  accept=".dxf,.svg,image/svg+xml"
                   onChange={handlePickPlan}
                   className="sr-only"
                   aria-label="도면 파일 선택"
@@ -3899,13 +4009,13 @@ function App() {
                   role="button"
                   tabIndex={0}
                   onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); if (fileRef.current) fileRef.current.click(); } }}
-                  title="지원 형식: DXF / SVG / PDF / PNG / JPG · 최대 40MB"
+                  title="지원 형식: DXF / SVG · 최대 40MB"
                   className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
                 >
                   <Icon name="Upload" size={12} />
                   도면 업로드
                 </label>
-                <span className="hidden shrink-0 text-[10px] font-semibold text-slate-400 xl:inline">DXF·SVG·PDF·PNG·JPG / 40MB</span>
+                <span className="hidden shrink-0 text-[10px] font-semibold text-slate-400 xl:inline">DXF·SVG / 40MB</span>
 
                 <button
                   type="button"
@@ -4076,6 +4186,17 @@ function App() {
                 </div>
               ) : null}
 
+              {!plan && !drawHover ? (
+                <div className="pointer-events-none absolute inset-x-0 bottom-14 z-10 flex justify-center px-4">
+                  <div className="flex items-center gap-2 rounded-full border border-slate-300 bg-white/95 px-4 py-2 shadow-lift">
+                    <Icon name="MousePointerClick" size={13} className="text-blue-700" />
+                    <span className="text-[11.5px] font-bold text-slate-700">
+                      후보 브랜드를 도면으로 드래그하거나, 카드 선택 후 구역을 클릭하세요
+                    </span>
+                  </div>
+                </div>
+              ) : null}
+
               {!showZones ? (
                 <div className="pointer-events-none absolute inset-0 z-10 flex items-center justify-center">
                   <div className="rounded-xl border border-slate-300 bg-white/95 px-4 py-3 text-center shadow-lift">
@@ -4131,7 +4252,7 @@ function App() {
             </div>
           </div>
 
-          <div className="min-h-0 flex-[3]">
+          <div className="min-h-0 flex-[2]">
             <RankingDashboard
               rows={rows}
               columns={columns}
@@ -4205,6 +4326,76 @@ function App() {
               {toastAction.label}
             </button>
           ) : null}
+        </div>
+      ) : null}
+
+      {/* 업로드 3~4단계 — 적용 전 확인 모달 (지시서 Task 4) */}
+      {uploadAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="upload-dialog-title"
+            className="w-full max-w-[460px] rounded-2xl border border-slate-200 bg-white p-5 shadow-lift"
+          >
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-700">
+                <Icon name="FileSearch" size={15} stroke={2.4} />
+              </span>
+              <div className="min-w-0">
+                <h3 id="upload-dialog-title" className="truncate text-[14px] font-black tracking-tight text-slate-900">도면 분석 결과</h3>
+                <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-500">{uploadAsk.name}</p>
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-2 gap-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[10px] font-bold text-slate-400">인식 구역</p>
+                <p className="text-[15px] font-black tabular text-slate-900">{uploadAsk.zoneCount}개</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[10px] font-bold text-slate-400">총 면적</p>
+                <p className="text-[15px] font-black tabular text-slate-900">{Math.round(uploadAsk.areaSum).toLocaleString()}</p>
+              </div>
+            </div>
+
+            <p className="mt-3 text-[10.5px] font-black text-slate-500">인식된 원본 라벨</p>
+            <ul className="custom-scrollbar mt-1 max-h-[120px] space-y-0.5 overflow-y-auto rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-[10.5px] font-semibold text-slate-600">
+              {uploadAsk.labels.length === 0 ? (
+                <li className="text-slate-400">라벨 없음</li>
+              ) : uploadAsk.labels.map((lb, i) => (
+                <li key={`lb-${i}`} className="truncate">{lb}</li>
+              ))}
+            </ul>
+            {uploadAsk.zoneCount > 40 ? (
+              <p className="mt-1 text-[10px] font-semibold text-slate-400">외 {uploadAsk.zoneCount - 40}개 더</p>
+            ) : null}
+
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-relaxed text-amber-800">
+              적용 시 기존 구역 {zones.length}개와 배치된 브랜드가 초기화됩니다.
+            </p>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setUploadAsk(null)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11.5px] font-bold text-slate-600 transition hover:bg-slate-50 active:scale-95"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => {
+                  const ask = uploadAsk;
+                  setUploadAsk(null);
+                  applyParsedPlan({ file: ask.file, out: ask.out });
+                }}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-[11.5px] font-black text-white transition hover:bg-slate-800 active:scale-95"
+              >
+                적용하기
+              </button>
+            </div>
+          </div>
         </div>
       ) : null}
 
