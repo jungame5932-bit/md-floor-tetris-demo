@@ -3169,7 +3169,20 @@ function App() {
   const [baseline, setBaseline] = useState(() => metricsOf(ZONES_BASE));
   // 업로드 도면에서 만든 구역 원본 — 리셋은 여기로 되돌아가야 한다
   const [planZones, setPlanZones] = useState(null);
-  const currentMetrics = useMemo(() => metricsOf(zones), [zones]);
+  /* 도면에 그리는 행, 상단 KPI, 후보 잠금 상태는 모두 같은 zones 스냅숏에서 나와야 한다.
+     예전에는 셋이 각자 zones 를 순회했다. 값은 같지만 계산 시점이 갈라지면
+     '지도에는 A, 합계에는 B' 같은 화면이 나올 수 있어 한 번만 파생시킨다. */
+  const derived = useMemo(() => {
+    const rowList = storeRows(zones).map((r) => ({ ...r, edited: Boolean(editedZones[r.zoneId]) }));
+    const occupiedBy = {};
+    zones.forEach((z) => {
+      if (z.currentBrand && z.currentBrand.name) occupiedBy[z.currentBrand.name] = z.id;
+    });
+    return { rows: rowList, metrics: metricsOf(zones), occupiedBy };
+  }, [zones, editedZones]);
+
+  const currentMetrics = derived.metrics;
+  const rows = derived.rows;
 
   const usedCounts = useMemo(() => {
     const counts = {};
@@ -3181,13 +3194,7 @@ function App() {
   }, [zones]);
 
   /** 브랜드 이름 → 입점 중인 구역 id. 한 브랜드는 한 구역에만 있을 수 있다. */
-  const usedBy = useMemo(() => {
-    const map = {};
-    zones.forEach((z) => {
-      if (z.currentBrand && z.currentBrand.name) map[z.currentBrand.name] = z.id;
-    });
-    return map;
-  }, [zones]);
+  const usedBy = derived.occupiedBy;
 
   const brandOccupant = useCallback((name) => usedBy[name] || null, [usedBy]);
 
@@ -3371,6 +3378,17 @@ function App() {
       const next = METRICS.find((m) => !prev.includes(m.key));
       return next ? [...prev, next.key] : prev;
     });
+  }, []);
+
+  // 뒤로가기·탭 복귀 시 브라우저가 bfcache 에서 DOM 을 되살리면,
+  // 배포 전 코드로 그린 지도와 새 합계가 섞여 보일 수 있다.
+  // 복원된 문서는 상태를 신뢰하지 않고 한 번 새로 받는다.
+  useEffect(() => {
+    const onShow = (ev) => {
+      if (ev.persisted) window.location.reload();
+    };
+    window.addEventListener('pageshow', onShow);
+    return () => window.removeEventListener('pageshow', onShow);
   }, []);
 
   /** 어떤 브랜드든 주어진 평수에 맞춰 매출을 다시 계산한다 */
@@ -3871,11 +3889,6 @@ function App() {
     setResetAsk({ replaceCount, editCount, colsChanged, settingsChanged, total });
   }, [zones, editedZones, columns, sortKey, sortDir, rankLimit, rankDir, areaMode, query, performReset, notify]);
 
-  const rows = useMemo(
-    () => storeRows(zones).map((r) => ({ ...r, edited: Boolean(editedZones[r.zoneId]) })),
-    [zones, editedZones],
-  );
-
   // 드래그 중일 때만 드롭 대상 구역을 표시한다 (단순 호버와 분리)
   const isDragging = Boolean(dragZoneId) || candidateDrag;
   const dropTargetId = isDragging ? hoveredZoneId : null;
@@ -3999,18 +4012,18 @@ function App() {
                   ref={fileRef}
                   id="plan-file-input"
                   type="file"
-                  accept=".dxf,.svg,image/svg+xml"
+                  accept=".dxf,.svg"
                   onChange={handlePickPlan}
-                  className="sr-only"
+                  className="peer sr-only"
                   aria-label="도면 파일 선택"
                 />
+                {/* label 이 input 을 직접 열어준다 — JS .click() 을 쓰지 않는다.
+                    키보드는 input 이 포커스를 받아 Enter/Space 로 열리고,
+                    그 포커스는 peer-focus-visible 로 label 테두리에 보인다. */}
                 <label
                   htmlFor="plan-file-input"
-                  role="button"
-                  tabIndex={0}
-                  onKeyDown={(ev) => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); if (fileRef.current) fileRef.current.click(); } }}
                   title="지원 형식: DXF / SVG · 최대 40MB"
-                  className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
+                  className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[#1E3A8A]"
                 >
                   <Icon name="Upload" size={12} />
                   도면 업로드
@@ -4186,12 +4199,17 @@ function App() {
                 </div>
               ) : null}
 
+              {/* 첫 화면 안내 — 도면 뷰어 내부 빈 공간(구획 사이 여백)에 띄운다.
+                  예전에는 bottom-14 로 뷰어 바닥에 붙은 알약이라 '하단 안내 문구'로 보였다
+                  (지시서 Task 7-3: 하단 텍스트 삭제 + 도면 내부 배너). */}
               {!plan && !drawHover ? (
-                <div className="pointer-events-none absolute inset-x-0 bottom-14 z-10 flex justify-center px-4">
-                  <div className="flex items-center gap-2 rounded-full border border-slate-300 bg-white/95 px-4 py-2 shadow-lift">
-                    <Icon name="MousePointerClick" size={13} className="text-blue-700" />
-                    <span className="text-[11.5px] font-bold text-slate-700">
-                      후보 브랜드를 도면으로 드래그하거나, 카드 선택 후 구역을 클릭하세요
+                <div className="pointer-events-none absolute inset-x-0 top-[27%] z-10 flex -translate-y-1/2 justify-center px-4">
+                  <div className="flex items-center gap-2.5 rounded-xl border border-blue-200 bg-white/95 px-4 py-2.5 shadow-lift">
+                    <Icon name="MousePointerClick" size={14} className="shrink-0 text-blue-700" />
+                    <span className="text-[12px] font-bold leading-snug text-slate-700">
+                      후보 브랜드를 도면으로 드래그하거나,
+                      <span className="mx-1 text-slate-300">|</span>
+                      카드 선택 후 구역을 클릭하세요
                     </span>
                   </div>
                 </div>
