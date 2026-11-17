@@ -59,7 +59,7 @@
   /* 인라인 수치 편집기 */
   .inline-editor {
     width: 100%;
-    border: 1px solid #E60012;
+    border: 1px solid #1E3A8A;
     border-radius: 4px;
     background: #FFFFFF;
     padding: 0 2px;
@@ -94,7 +94,7 @@
     pointer-events: none;
     transform: translate(-50%, -140%);
     border-radius: 8px;
-    border: 1px solid #E60012;
+    border: 1px solid #1E3A8A;
     background: rgba(255, 255, 255, 0.97);
     padding: 5px 9px;
     font-size: 11px;
@@ -118,14 +118,14 @@
   }
   .cand-card { transition: border-color .15s ease, box-shadow .15s ease, background .15s ease; }
   .cand-card:hover { border-color: #94A3B8; }
-  /* P1-3: 포커스는 롯데 레드 아웃라인으로 통일. Tailwind 의 outline-none 이 나중에 주입되므로 !important 로 이긴다. */
-  *:focus-visible { outline: 2px solid #E60012 !important; outline-offset: 2px; }
+  /* P1-3: 포커스 아웃라인은 롯데 네이비로 통일. 빨강은 역신장·삭제 전용으로 남긴다. */
+  *:focus-visible { outline: 2px solid #1E3A8A !important; outline-offset: 2px; }
   /* 코드로 focus() 를 옮긴 경우에도 링이 보이게 한다 — 지시서: 매 정지점에서 포커스 링 표시 */
-  .cand-card:focus { outline: 2px solid #E60012 !important; outline-offset: 2px; }
+  .cand-card:focus { outline: 2px solid #1E3A8A !important; outline-offset: 2px; }
   .zone-group:focus { outline: none !important; }
-  .zone-group:focus .zone-shape { stroke: #E60012; stroke-width: 3; }
+  .zone-group:focus .zone-shape { stroke: #1E3A8A; stroke-width: 3; }
   .zone-group:focus-visible { outline: none !important; }
-  .zone-group:focus-visible .zone-shape { stroke: #E60012; stroke-width: 3; }
+  .zone-group:focus-visible .zone-shape { stroke: #1E3A8A; stroke-width: 3; }
 </style>
 </head>
 <body class="flex h-screen flex-col bg-[#FAF9F7] text-slate-800 antialiased">
@@ -2400,8 +2400,8 @@ function FloorPlan({
           {showRegions && analysis && analysis.regionD ? (
             <path
               d={analysis.regionD}
-              fill="rgba(230,0,18,0.05)"
-              stroke="#E60012"
+              fill="rgba(30,58,138,0.05)"
+              stroke="#1E3A8A"
               strokeWidth="1.4"
               strokeDasharray="6 4"
               strokeLinejoin="round"
@@ -2472,7 +2472,7 @@ function FloorPlan({
           <line x1="330" y1="72" x2="330" y2="104" stroke="#CBD5E1" strokeWidth="1.4" strokeDasharray="3 3" />
           <line x1="670" y1="76" x2="670" y2="98" stroke="#CBD5E1" strokeWidth="1.4" strokeDasharray="3 3" />
           <rect x="250" y="24" width="500" height="40" rx="20" fill="#FFFFFF" stroke="#CBD5E1" strokeWidth="1.5" filter="url(#soft-shadow)" />
-          <circle cx="280" cy="44" r="10" fill="#E60012" />
+          <circle cx="280" cy="44" r="10" fill="#1E3A8A" />
           <text x="280" y="48" textAnchor="middle" fill="#FFFFFF" fontSize="10" fontWeight="900" fontFamily="Pretendard, sans-serif">2</text>
           <text x="510" y="48.5" textAnchor="middle" fill="#1E293B" fontSize="12" fontWeight="800" fontFamily="Pretendard, sans-serif">
             2호선 잠실역 지하광장 · 트레비 분수 진입
@@ -2540,7 +2540,7 @@ function CandidateCard({ brand, selected, usedCount, occupiedZone, onSelect, onD
         locked
           ? 'cursor-not-allowed border-slate-200 bg-slate-50/80 opacity-60'
           : selected
-            ? 'cursor-grab border-rose-500 bg-rose-50/70 ring-2 ring-rose-500/15 active:cursor-grabbing'
+            ? 'cursor-grab border-blue-700 bg-blue-50/60 ring-2 ring-blue-700/15 active:cursor-grabbing'
             : 'cursor-grab border-slate-200/90 bg-white hover:border-slate-300 hover:shadow-card active:cursor-grabbing'
       }`}
     >
@@ -2571,7 +2571,7 @@ function CandidateCard({ brand, selected, usedCount, occupiedZone, onSelect, onD
           <p className={`text-[11.5px] font-black tabular tracking-tight ${locked ? 'text-slate-500' : 'text-slate-900'}`}>
             {man(brand.pyeongEfficiency)}<span className="ml-0.5 text-[9px] font-semibold text-slate-400">만</span>
           </p>
-          <p className={`text-[10px] font-bold tabular ${locked ? 'text-slate-400' : 'text-rose-600'}`}>
+          <p className={`text-[10px] font-bold tabular ${locked ? 'text-slate-400' : 'text-slate-600'}`}>
             <span className="mr-0.5 font-semibold text-slate-400">수수료율</span>{brand.commissionRate}%
           </p>
         </div>
@@ -2659,7 +2659,7 @@ function BrandListPanel({
           type="button"
           onClick={() => onTab('brands')}
           className={`rounded-t-lg px-3 py-1.5 text-[11.5px] font-black transition ${
-            tab === 'brands' ? 'border-b-2 border-rose-500 text-slate-900' : 'text-slate-400 hover:text-slate-600'
+            tab === 'brands' ? 'border-b-2 border-blue-700 text-slate-900' : 'text-slate-400 hover:text-slate-600'
           }`}
         >
           브랜드 목록
@@ -2669,7 +2669,7 @@ function BrandListPanel({
           type="button"
           onClick={() => onTab('candidates')}
           className={`rounded-t-lg px-3 py-1.5 text-[11.5px] font-black transition ${
-            tab === 'candidates' ? 'border-b-2 border-rose-500 text-slate-900' : 'text-slate-400 hover:text-slate-600'
+            tab === 'candidates' ? 'border-b-2 border-blue-700 text-slate-900' : 'text-slate-400 hover:text-slate-600'
           }`}
         >
           교체 후보
@@ -2977,7 +2977,7 @@ function RankingColumn({
               onKeyDown={(ev) => { if (ev.key === 'Enter') { ev.preventDefault(); onSelect(row.zoneId); } }}
               aria-label={`${i + 1}위 ${row.name} ${metric.label} ${metricFmt(col.key, row[col.key])}`}
               className={`mb-0.5 flex w-full cursor-pointer items-center gap-1 rounded-md px-1 py-0.5 text-left transition ${
-                active ? 'bg-rose-50 ring-1 ring-rose-200' : 'hover:bg-slate-50'
+                active ? 'bg-blue-50/70 ring-1 ring-blue-200' : 'hover:bg-slate-50'
               } ${pulsing ? 'swap-pulse' : ''}`}
             >
               <span
@@ -3017,7 +3017,7 @@ function RankingDashboard({
     <div className="flex min-h-0 flex-col overflow-hidden rounded-2xl border border-slate-200/90 bg-white shadow-card">
       <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-b border-slate-100 px-3 py-1.5">
         <h2 className="flex items-center gap-2 text-[11.5px] font-black text-slate-900">
-          <span className="h-2 w-2 rounded-full bg-rose-500" />
+          <span className="h-2 w-2 rounded-full bg-blue-700" />
           지표 대시보드
           <span className="text-[10px] font-bold text-slate-400">지표 순위 · 수치 더블클릭 편집</span>
         </h2>
@@ -3100,7 +3100,7 @@ function RankingDashboard({
           className={`flex w-[92px] shrink-0 flex-col items-center justify-center gap-1 rounded-xl border border-slate-300 bg-white text-[10px] font-black transition ${
             unused.length === 0
               ? 'cursor-not-allowed border-slate-200 text-slate-300'
-              : 'text-slate-500 hover:border-rose-400 hover:bg-rose-50 hover:text-rose-600 active:scale-95'
+              : 'text-slate-500 hover:border-blue-400 hover:bg-blue-50 hover:text-blue-700 active:scale-95'
           }`}
         >
           <Icon name="Plus" size={14} stroke={2.6} />
@@ -3986,7 +3986,7 @@ function App() {
             <div className="flex shrink-0 items-center justify-between gap-3 border-b border-slate-200/80 bg-white/90 px-4 py-2 text-xs font-semibold text-slate-500 backdrop-blur-sm">
               <div className="flex min-w-0 items-center gap-2">
                 <span className="flex min-w-0 items-center gap-1.5 font-bold text-slate-700">
-                  <span className={`h-2 w-2 shrink-0 rounded-full ${plan ? 'bg-rose-500' : 'bg-emerald-500'}`} />
+                  <span className={`h-2 w-2 shrink-0 rounded-full ${plan ? 'bg-blue-700' : 'bg-emerald-500'}`} />
                   <span className="truncate">{plan ? plan.name : '잠실점 B1 기본 도면.svg'}</span>
                 </span>
                 <span className="shrink-0 rounded bg-slate-100 px-1.5 py-0.5 text-[10px] font-bold text-slate-500">
@@ -4133,7 +4133,7 @@ function App() {
 
             <div
               className={`relative flex min-h-0 flex-1 items-center justify-center p-2 transition ${
-                drawHover ? 'bg-rose-50/50 ring-2 ring-inset ring-rose-300' : ''
+                drawHover ? 'bg-blue-50/60 ring-2 ring-inset ring-blue-300' : ''
               }`}
               onDragOver={(ev) => {
                 if (ev.dataTransfer.types.includes('Files')) {
@@ -4181,8 +4181,8 @@ function App() {
               />
 
               {drawHover ? (
-                <div className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-xl border-2 border-rose-300 bg-white/70 ring-4 ring-rose-200/60">
-                  <span className="text-sm font-black text-rose-600">여기에 놓으면 도면으로 적용됩니다</span>
+                <div className="pointer-events-none absolute inset-2 flex items-center justify-center rounded-xl border-2 border-blue-300 bg-white/70 ring-4 ring-blue-200/60">
+                  <span className="text-sm font-black text-blue-700">여기에 놓으면 도면으로 적용됩니다</span>
                 </div>
               ) : null}
 
@@ -4210,7 +4210,7 @@ function App() {
 
               {parsing ? (
                 <div className="absolute inset-0 z-10 flex flex-col items-center justify-center gap-3 bg-white/80 backdrop-blur-sm">
-                  <span className="h-7 w-7 animate-spin rounded-full border-[3px] border-slate-200 border-t-rose-500" />
+                  <span className="h-7 w-7 animate-spin rounded-full border-[3px] border-slate-200 border-t-blue-700" />
                   <span className="text-[12px] font-bold text-slate-600">{parsing}</span>
                 </div>
               ) : null}
