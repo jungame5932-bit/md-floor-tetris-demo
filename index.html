@@ -4345,13 +4345,21 @@ function App() {
 
       </div>
 
-      {/* 일반 안내 — 2.6초. 되돌리기 토스트보다 아래층에 둔다. */}
+      {/* 토스트 스택 — 한 컨테이너에 모아 세로로 쌓는다.
+          따로 띄우면 되돌리기와 일반 안내가 서로 겹친다.
+          bottom 48px: 대시보드 카드 하단 경계(뷰포트 바닥에서 41px)보다 위에 놓는다.
+          40px 로 두면 카드 테두리에 1px 걸친다 (실측). */}
+      {toast || actionToast ? (
+      <div
+        role="status"
+        aria-live="polite"
+        style={{ zIndex: 9999, bottom: '48px' }}
+        className="pointer-events-none fixed left-1/2 flex -translate-x-1/2 flex-col items-center gap-2"
+      >
       {toast ? (
         <div
-          role="status"
-          aria-live="polite"
           data-toast-kind="notice"
-          className="pointer-events-none fixed bottom-6 left-1/2 z-50 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift"
+          className="flex items-center gap-2 rounded-xl border border-slate-200 bg-white px-4 py-2.5 shadow-lift"
         >
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-emerald-500 text-white">
             <Icon name="Check" size={10} stroke={3} />
@@ -4360,15 +4368,11 @@ function App() {
         </div>
       ) : null}
 
-      {/* 되돌리기 — 9초. 일반 안내가 떠도 덮이지 않는다.
-          z-index 9999 / bottom 40px: 대시보드 패널 하단 경계 위로 띄워 겹치지 않게 한다. */}
+      {/* 되돌리기 — 9초. 일반 안내가 떠도 덮이지 않고, 위로 쌓여 겹치지도 않는다. */}
       {actionToast ? (
         <div
-          role="status"
-          aria-live="polite"
           data-toast-kind="action"
-          style={{ zIndex: 9999, bottom: '40px' }}
-          className="fixed left-1/2 flex -translate-x-1/2 items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 shadow-lift"
+          className="pointer-events-auto flex items-center gap-2 rounded-xl border border-slate-300 bg-white px-4 py-2.5 shadow-lift"
         >
           <span className="flex h-4 w-4 items-center justify-center rounded-full bg-blue-700 text-white">
             <Icon name="Check" size={10} stroke={3} />
@@ -4387,6 +4391,8 @@ function App() {
             {actionToast.action.label}
           </button>
         </div>
+      ) : null}
+      </div>
       ) : null}
 
       {/* 업로드 3~4단계 — 적용 전 확인 모달 (지시서 Task 4) */}
