@@ -1350,7 +1350,7 @@ const { useState, useMemo, useCallback, useEffect, useRef } = React;
 
 /* ================================================================
  * 1. DATA — 잠실점 B1 비정형 매장 6구역 (면적 합계 200평)
- *    기준 지표: 총매출 30.0억 · 평균 평효율 1,502만/평 · 수수료 5.15억 (17.1%)
+ *    기준 지표: 총매출 30.0억 · 평균 평효율 15,020천원/평 · 수수료 5.15억 (17.1%)
  * ================================================================ */
 
 const VIEWBOX = { w: 1000, h: 680 };
@@ -1371,6 +1371,196 @@ function loadDwgLib() {
   }
   return dwgLibPromise;
 }
+
+/* ================================================================
+ * 백데이터(엑셀·CSV) 업로드
+ * 이 앱은 서버도 DB도 없이 단일 HTML 로 돈다. 매출·평수 같은 값은
+ * ZONES_BASE 상수에 들어 있고, 업로드한 표는 화면 상태로만 반영된다.
+ * 즉 '업로드 = 상수 대신 표를 그 세션의 데이터로 쓰는 것'이다.
+ * ================================================================ */
+const XLSX_CDN = 'https://cdn.jsdelivr.net/npm/xlsx@0.18.5/dist/xlsx.full.min.js';
+let xlsxLibPromise = null;
+function loadXlsxLib() {
+  if (typeof window !== 'undefined' && window.XLSX) return Promise.resolve(window.XLSX);
+  if (!xlsxLibPromise) {
+    xlsxLibPromise = new Promise((resolve, reject) => {
+      const el = document.createElement('script');
+      el.src = XLSX_CDN;
+      el.async = true;
+      el.onload = () => (window.XLSX ? resolve(window.XLSX) : reject(new Error('엑셀 모듈을 초기화하지 못했습니다')));
+      el.onerror = () => reject(new Error('엑셀 모듈을 불러오지 못했습니다 — 네트워크를 확인해 주세요'));
+      document.head.appendChild(el);
+    }).catch((err) => { xlsxLibPromise = null; throw err; });
+  }
+  return xlsxLibPromise;
+}
+
+/** 표 헤더 별칭 — 긴 별칭을 먼저 맞춰 '전년매출'이 '매출'로 잡히지 않게 한다 */
+const DATA_COLUMNS = [
+  { key: 'zoneId', aliases: ['구역id', '구역코드', 'zoneid', 'zone', '구역'] },
+  { key: 'brand', aliases: ['브랜드명', '입점브랜드', 'brand', '브랜드'] },
+  { key: 'category', aliases: ['카테고리', '업종', 'category'] },
+  { key: 'area', aliases: ['평수', '면적', 'area', '평'] },
+  { key: 'salesPrev', aliases: ['전년매출', '작년매출', 'salesprev'] },
+  { key: 'salesCurr', aliases: ['금년매출', '월매출', 'salescurr', '매출', 'sales'] },
+  { key: 'efficiency', aliases: ['평당효율', '평효율', 'efficiency'] },
+  { key: 'commissionRate', aliases: ['수수료율', '수수료', 'commissionrate', 'commission'] },
+  { key: 'profitRate', aliases: ['이익률', '이익율', 'profitrate'] },
+];
+
+/** 헤더 괄호 안 단위를 배율로 — '매출(억)' → 1e8 */
+function dataHeaderUnit(h) {
+  const t = String(h == null ? '' : h);
+  if (/억/.test(t)) return 1e8;
+  if (/만\s*원|만\)/.test(t)) return 1e4;
+  if (/천\s*원/.test(t)) return 1e3;
+  return null;
+}
+
+function dataNum(v) {
+  if (v == null || v === '') return NaN;
+  if (typeof v === 'number') return Number.isFinite(v) ? v : NaN;
+  const t = String(v).replace(/[,\s₩원%]/g, '');
+  if (t === '' || t === '-') return NaN;
+  const n = Number(t);
+  return Number.isFinite(n) ? n : NaN;
+}
+
+/** 헤더 행 → { 열키: 인덱스 }, { 열키: 단위배율 } */
+function mapDataColumns(headerRow) {
+  const pairs = [];
+  DATA_COLUMNS.forEach((col) => col.aliases.forEach((a) => pairs.push([col.key, a])));
+  pairs.sort((x, y) => y[1].length - x[1].length);
+  const map = {};
+  const units = {};
+  headerRow.forEach((h, i) => {
+    const raw = String(h == null ? '' : h);
+    const bare = raw.replace(/\s+/g, '').replace(/[()[\]{}]/g, '').toLowerCase();
+    if (!bare) return;
+    for (let k = 0; k < pairs.length; k += 1) {
+      const key = pairs[k][0], alias = pairs[k][1];
+      if (map[key] != null) continue;
+      if (bare === alias || (alias.length > 1 && bare.indexOf(alias) === 0)) {
+        map[key] = i;
+        units[key] = dataHeaderUnit(raw);
+        break;
+      }
+    }
+  });
+  return { map, units };
+}
+
+async function parseDataWorkbook(file) {
+  const XLSX = await loadXlsxLib();
+  const buf = await file.arrayBuffer();
+  const wb = XLSX.read(buf, { type: 'array' });
+  const sheetName = wb.SheetNames && wb.SheetNames[0];
+  if (!sheetName) throw new Error('시트를 찾지 못했습니다');
+  const table = XLSX.utils.sheet_to_json(wb.Sheets[sheetName], { header: 1, raw: true, defval: null });
+  let headerIdx = -1;
+  for (let i = 0; i < table.length; i += 1) {
+    const row = table[i];
+    if (Array.isArray(row) && row.some((c) => c != null && String(c).trim() !== '')) { headerIdx = i; break; }
+  }
+  if (headerIdx < 0) throw new Error('표에 데이터가 없습니다');
+  const mapped = mapDataColumns(table[headerIdx]);
+  if (mapped.map.brand == null && mapped.map.salesCurr == null) {
+    throw new Error('브랜드 또는 매출 열을 찾지 못했습니다 — 양식 행을 확인해 주세요');
+  }
+  const cellOf = (row, key) => (mapped.map[key] == null ? null : row[mapped.map[key]]);
+  const records = [];
+  const skipped = [];
+  for (let i = headerIdx + 1; i < table.length; i += 1) {
+    const row = table[i];
+    if (!Array.isArray(row)) continue;
+    if (row.every((c) => c == null || String(c).trim() === '')) continue;
+    const brand = cellOf(row, 'brand') == null ? '' : String(cellOf(row, 'brand')).trim();
+    const salesCurr = dataNum(cellOf(row, 'salesCurr'));
+    if (!brand && !(salesCurr > 0)) { skipped.push(i + 1); continue; }
+    records.push({
+      excelRow: i + 1,
+      zoneId: cellOf(row, 'zoneId') == null ? '' : String(cellOf(row, 'zoneId')).trim(),
+      brand,
+      category: cellOf(row, 'category') == null ? '' : String(cellOf(row, 'category')).trim(),
+      area: dataNum(cellOf(row, 'area')),
+      salesCurr,
+      salesPrev: dataNum(cellOf(row, 'salesPrev')),
+      eff: dataNum(cellOf(row, 'efficiency')),
+      commissionRate: dataNum(cellOf(row, 'commissionRate')),
+      profitRate: dataNum(cellOf(row, 'profitRate')),
+      units: mapped.units,
+    });
+  }
+  if (!records.length) throw new Error('읽을 수 있는 행이 없습니다');
+  return { sheetName, records, skipped, units: mapped.units };
+}
+
+/**
+ * 표 레코드를 내장 도면 구역에 얹는다.
+ * 도면 형상은 6칸 고정이므로 구역ID 가 있으면 그 칸에, 없으면 남은 칸에 순서대로 배정한다.
+ * 매출 단위는 헤더 괄호(억·만원·천원)를 따르고, 표기가 없으면 1만 이하는 억으로 본다.
+ */
+function zonesFromDataRecords(records, baseZones) {
+  const base = (baseZones && baseZones.length ? baseZones : ZONES_BASE);
+  const byId = {};
+  base.forEach((z) => { byId[z.id] = z; });
+  const used = {};
+  const matched = [];
+  const pending = [];
+  records.forEach((r) => {
+    const m = /Z-\s*(\d+)/i.exec(r.zoneId || '');
+    const id = m ? ('Z-' + String(Number(m[1])).padStart(2, '0')) : null;
+    if (id && byId[id] && !used[id]) { used[id] = true; r.zoneIdResolved = id; matched.push(r); }
+    else pending.push(r);
+  });
+  pending.forEach((r) => {
+    let free = null;
+    for (let i = 0; i < base.length; i += 1) { if (!used[base[i].id]) { free = base[i]; break; } }
+    if (!free) return;
+    used[free.id] = true;
+    r.zoneIdResolved = free.id;
+    matched.push(r);
+  });
+  const extra = records.filter((r) => matched.indexOf(r) < 0);
+  // 표에 없는 구역은 그대로 둔다 — 일부 행만 올렸다고 도면 칸이 사라지면 안 된다.
+  const built = matched.map((r) => {
+    const geo = byId[r.zoneIdResolved];
+    const src = geo.currentBrand || {};
+    const area = r.area > 0 ? Math.round(r.area) : geo.area;
+    let salesCurr = Number.isFinite(r.salesCurr) ? r.salesCurr : NaN;
+    if (Number.isFinite(salesCurr)) {
+      const u = (r.units && r.units.salesCurr) || (salesCurr <= 10000 ? 1e8 : 1);
+      salesCurr = Math.round(salesCurr * u);
+    }
+    const effUnit = (r.units && r.units.efficiency) || 1e3;
+    let eff = Number.isFinite(r.eff) ? Math.round((r.eff * effUnit) / 1e4) : NaN;
+    if (!Number.isFinite(salesCurr) && Number.isFinite(eff)) salesCurr = Math.round(area * eff * 1e4);
+    if (!Number.isFinite(eff) && Number.isFinite(salesCurr) && area > 0) eff = Math.round(salesCurr / area / 1e4);
+    let salesPrev = NaN;
+    if (Number.isFinite(r.salesPrev)) {
+      const pu = (r.units && r.units.salesPrev) || (r.salesPrev <= 10000 ? 1e8 : 1);
+      salesPrev = Math.round(r.salesPrev * pu);
+    }
+    return {
+      ...geo,
+      area,
+      currentBrand: {
+        name: r.brand || src.name,
+        category: r.category || src.category,
+        pyeongEfficiency: Number.isFinite(eff) ? eff : (src.pyeongEfficiency || 0),
+        commissionRate: Number.isFinite(r.commissionRate) ? r.commissionRate : (src.commissionRate || 16),
+        salesCurr: Number.isFinite(salesCurr) ? salesCurr : 0,
+        salesPrev: Number.isFinite(salesPrev) ? salesPrev : (src.salesPrev || 0),
+        profitRate: Number.isFinite(r.profitRate) ? r.profitRate : (src.profitRate || 16),
+      },
+      isReplaced: false,
+    };
+  });
+  const byZoneId = {};
+  built.forEach((z) => { byZoneId[z.id] = z; });
+  const zones = base.map((z) => byZoneId[z.id] || z);
+  return { zones, extra, matched: matched.length };
+}
 // 내장 도면은 실제로 그려지는 영역( x 70~920 · y 110~580 )에 맞춰 잘라 보여준다.
 // 업로드 도면은 letterbox 계산이 VIEWBOX 전체를 쓰므로 전체 뷰를 유지한다 (지시서 Task 7-3).
 const PLAN_TIGHT_VIEW = { x: -38, y: 100, w: 1076, h: 484 };
@@ -1380,7 +1570,7 @@ const ZONES_BASE = [
     id: 'Z-01', area: 35, status: '우수',
     locationType: '북서측 원형광장 부채꼴 파사드',
     currentBrand: {
-      name: '브랜드 K', category: '카페',
+      name: '바샤커피 (Bacha)', category: '카페',
       pyeongEfficiency: 2400, commissionRate: 18,
       salesCurr: 840000000, salesPrev: 750000000, profitRate: 22,
     },
@@ -1394,7 +1584,7 @@ const ZONES_BASE = [
     id: 'Z-02', area: 20, status: '부진',
     locationType: '북동측 사선 챔퍼',
     currentBrand: {
-      name: '브랜드 L', category: '베이커리',
+      name: '올드 베이커리', category: '베이커리',
       pyeongEfficiency: 980, commissionRate: 15,
       salesCurr: 196000000, salesPrev: 214000000, profitRate: 11,
     },
@@ -1408,7 +1598,7 @@ const ZONES_BASE = [
     id: 'Z-03', area: 25, status: '부진',
     locationType: '서측 사선 평행사변형 스트리트',
     currentBrand: {
-      name: '브랜드 M', category: '델리',
+      name: '아메리칸 샌드위치', category: '델리',
       pyeongEfficiency: 920, commissionRate: 21,
       salesCurr: 230000000, salesPrev: 237600000, profitRate: 13,
     },
@@ -1422,7 +1612,7 @@ const ZONES_BASE = [
     id: 'Z-04', area: 15, status: '부진',
     locationType: '중앙 코어 보이드 유선형 아일랜드',
     currentBrand: {
-      name: '브랜드 N', category: '디저트',
+      name: '전통 모나카 부티크', category: '디저트',
       pyeongEfficiency: 850, commissionRate: 20,
       salesCurr: 127500000, salesPrev: 122500000, profitRate: 16,
     },
@@ -1437,7 +1627,7 @@ const ZONES_BASE = [
     id: 'Z-05', area: 40, status: '보통',
     locationType: '남서측 L자형 대형 식당가',
     currentBrand: {
-      name: '브랜드 O', category: '다이닝',
+      name: '고든램지 스트리트 버거', category: '다이닝',
       pyeongEfficiency: 1750, commissionRate: 19,
       salesCurr: 700000000, salesPrev: 681600000, profitRate: 17,
     },
@@ -1451,7 +1641,7 @@ const ZONES_BASE = [
     id: 'Z-06', area: 65, status: '앵커',
     locationType: '남동측 에비뉴엘 연결 사다리꼴',
     currentBrand: {
-      name: '브랜드 P', category: '주류/식품',
+      name: '레피세리 와인 & 마켓', category: '주류/식품',
       pyeongEfficiency: 1400, commissionRate: 14,
       salesCurr: 910000000, salesPrev: 968000000, profitRate: 9,
     },
@@ -1464,16 +1654,12 @@ const ZONES_BASE = [
 ];
 
 const CANDIDATES = [
-  { id: 'C-01', name: '브랜드 A', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, profitRate: 19, growthRate: 34.2, tag: '평일 오전 매출 비중 41%' },
-  { id: 'C-02', name: '브랜드 B', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, profitRate: 21, growthRate: 18.5, tag: '재방문율 38% · 객단가 1.8만' },
-  { id: 'C-03', name: '브랜드 C', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, profitRate: 26, growthRate: 9.4, tag: '선물 세트 매출 비중 46%' },
-  { id: 'C-04', name: '브랜드 D', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, profitRate: 15, growthRate: -2.1, tag: '시간당 회전 2.4회' },
-  { id: 'C-05', name: '브랜드 E', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, profitRate: 18, growthRate: 24.8, tag: '테이크아웃 비중 58%' },
-  { id: 'C-06', name: '브랜드 F', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, profitRate: 28, growthRate: 6.7, tag: '주류 동반 구매 31%' },
-  { id: 'C-07', name: '브랜드 G', category: '주류/식품', pyeongEfficiency: 2050, commissionRate: 17, profitRate: 20, growthRate: 11.3, tag: '저녁 매출 비중 52%' },
-  { id: 'C-08', name: '브랜드 H', category: '카페', pyeongEfficiency: 3100, commissionRate: 19, profitRate: 17, growthRate: 27.6, tag: '오전 피크 집중 39%' },
-  { id: 'C-09', name: '브랜드 I', category: '베이커리', pyeongEfficiency: 2450, commissionRate: 20, profitRate: 24, growthRate: 4.8, tag: '예약 주문 비중 33%' },
-  { id: 'C-10', name: '브랜드 J', category: '다이닝', pyeongEfficiency: 1980, commissionRate: 22, profitRate: 13, growthRate: -6.4, tag: '주말 매출 비중 47%' },
+  { id: 'C-01', name: '런던베이글뮤지엄', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, profitRate: 19, growthRate: 34.2, tag: '평일 오전 매출 비중 41%' },
+  { id: 'C-02', name: '노티드 월드', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, profitRate: 21, growthRate: 18.5, tag: '재방문율 38% · 객단가 1.8만' },
+  { id: 'C-03', name: '삐아프 쇼콜라', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, profitRate: 26, growthRate: 9.4, tag: '선물 세트 매출 비중 46%' },
+  { id: 'C-04', name: '땀땀 (TamTam)', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, profitRate: 15, growthRate: -2.1, tag: '시간당 회전 2.4회' },
+  { id: 'C-05', name: '카멜커피', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, profitRate: 18, growthRate: 24.8, tag: '테이크아웃 비중 58%' },
+  { id: 'C-06', name: '트러플 아티장 델리', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, profitRate: 28, growthRate: 6.7, tag: '주류 동반 구매 31%' },
 ];
 
 const CAT_TAG = {
@@ -1512,6 +1698,9 @@ function moneyShort(v) {
   }
   return `${man(Math.round(v / 1e4))}만`;
 }
+
+/** 평효율 표시 — 원/평을 천원/평으로 (1,502만 → 15,020천원) */
+const effShort = (v) => `${man(Math.round(v / 1e3))}천원`;
 
 /** 신장율(%). 전년 매출이 0 이하이면 null 을 돌려 '신규'로 다룬다. */
 function growthOf(curr, prev) {
@@ -1574,7 +1763,7 @@ function storeRows(zones) {
   return zones.map(enrichRow);
 }
 
-/** 층 합계 — rev·profit 단위는 억 원, eff 는 만 원/평 */
+/** 층 합계 — rev·profit 단위는 억 원, eff 는 천원/평 */
 function metricsOf(zones) {
   let rev = 0;
   let profit = 0;
@@ -1589,7 +1778,7 @@ function metricsOf(zones) {
     rev,
     profit,
     pyeong,
-    eff: pyeong ? (rev * 1e8) / pyeong / 1e4 : 0,
+    eff: pyeong ? (rev * 1e8) / pyeong / 1e3 : 0,
     profitRate: rev ? (profit / rev) * 100 : 0,
   };
 }
@@ -1861,7 +2050,7 @@ const SORTS = [
  */
 const METRICS = [
   { key: 'salesCurr', label: '매출', icon: 'TrendingUp', unit: 'won', editable: true, fmt: (v) => moneyShort(v) },
-  { key: 'efficiency', label: '평효율', icon: 'Gauge', unit: 'wonPerPyeong', editable: true, fmt: (v) => `${man(Math.round(v / 1e4))}만` },
+  { key: 'efficiency', label: '평효율', icon: 'Gauge', unit: 'wonPerPyeong', editable: true, fmt: (v) => effShort(v) },
   { key: 'profitRate', label: '이익율', icon: 'Percent', unit: 'percent', editable: true, fmt: (v) => `${Number(v.toFixed(1))}%` },
   { key: 'profitAmt', label: '이익액', icon: 'Wallet', unit: 'won', editable: true, fmt: (v) => moneyShort(v) },
   { key: 'growthRate', label: '신장율', icon: 'LineChart', unit: 'percent', editable: false, fmt: (v) => growthText(v) },
@@ -1896,8 +2085,9 @@ function parseMetricInput(key, raw, row) {
     if (num > 100) return { ok: false, reason: '100억을 넘을 수 없습니다' };
     value = Math.round(num * 1e8);
   } else if (unit === 'wonPerPyeong') {
+    // 평효율은 천원 단위로 입력받는다 (24,000 → 24,000천원/평 = 2,400만원/평)
     if (num > 100000) return { ok: false, reason: '평효율이 범위를 벗어났습니다' };
-    value = Math.round(num * 1e4);
+    value = Math.round(num * 1e3);
   } else if (unit === 'percent') {
     if (num > 100) return { ok: false, reason: '100%를 넘을 수 없습니다' };
     value = Math.round(num * 10) / 10;
@@ -1912,7 +2102,7 @@ function parseMetricInput(key, raw, row) {
 function metricEditValue(key, row) {
   const unit = (METRIC_BY_KEY[key] || {}).unit;
   if (unit === 'won') return String(Math.round((row[key] / 1e8) * 100) / 100);
-  if (unit === 'wonPerPyeong') return String(Math.round(row[key] / 1e4));
+  if (unit === 'wonPerPyeong') return String(Math.round(row[key] / 1e3));
   if (unit === 'percent') return String(Number(Number(row[key]).toFixed(1)));
   if (unit === 'pyeong') return String(row[key]);
   return String(row[key]);
@@ -1968,7 +2158,7 @@ function sortRows(rows, key, dir) {
 function metricText(row, key) {
   if (key === 'salesCurr') return moneyShort(row.salesCurr);
   if (key === 'growthRate') return growthText(row.growthRate);
-  if (key === 'efficiency') return `${man(Math.round(row.efficiency / 1e4))}만`;
+  if (key === 'efficiency') return effShort(row.efficiency);
   if (key === 'pyeong') return `${row.pyeong}평`;
   if (key === 'profitRate') return `${row.profitRate}%`;
   if (key === 'profitAmt') return moneyShort(row.profitAmt);
@@ -2127,7 +2317,7 @@ function ZoneShape({
 
   const finalName = row.name;
   const subText = `월 ${moneyShort(row.salesCurr)} / ${growthText(row.growthRate)}`;
-  const effText = `평효율 ${man(Math.round(row.efficiency / 1e4))}만/평`;
+  const effText = `평효율 ${man(Math.round(row.efficiency / 1e3))}천원/평`;
   const pyeongText = `${row.pyeong}평 · ${zone.id}`;
   const badgeY = y1 - fsName - 3;
   const growth = row.growthRate;
@@ -2144,7 +2334,7 @@ function ZoneShape({
         if (ev.button !== 0) return;
         onPointerDragStart(ev, zone.id, row);
       }}
-      aria-label={`${zone.id} ${zone.locationType} ${row.pyeong}평 ${row.name} ${row.category} 매출 ${moneyShort(row.salesCurr)} 신장율 ${growthText(growth)} 평효율 ${man(Math.round(row.efficiency / 1e4))}만 원 이익율 ${row.profitRate}퍼센트`}
+      aria-label={`${zone.id} ${zone.locationType} ${row.pyeong}평 ${row.name} ${row.category} 매출 ${moneyShort(row.salesCurr)} 신장율 ${growthText(growth)} 평효율 ${man(Math.round(row.efficiency / 1e3))}천원 이익율 ${row.profitRate}퍼센트`}
       onMouseEnter={() => onHover(zone.id)}
       onMouseLeave={onLeave}
       onClick={() => onActivate(zone.id, 'zone')}
@@ -2542,7 +2732,7 @@ function CandidateCard({ brand, selected, usedCount, occupiedZone, onSelect, onD
       aria-disabled={locked}
       aria-label={locked
         ? `${brand.id} ${brand.name} 이미 ${occupiedZone}에 입점 중`
-        : `${brand.id} ${brand.name} ${brand.category} 평효율 ${man(brand.pyeongEfficiency)}만 원 수수료율 ${brand.commissionRate}퍼센트`}
+        : `${brand.id} ${brand.name} ${brand.category} 평효율 ${man(brand.pyeongEfficiency * 10)}천원 수수료율 ${brand.commissionRate}퍼센트`}
       draggable={!locked}
       onDragStart={(ev) => {
         if (locked) { ev.preventDefault(); return; }
@@ -2605,7 +2795,7 @@ function CandidateCard({ brand, selected, usedCount, occupiedZone, onSelect, onD
       <div className="flex shrink-0 items-center gap-2 text-right">
         <div>
           <p className={`text-[11.5px] font-black tabular tracking-tight ${locked ? 'text-slate-500' : 'text-slate-900'}`}>
-            {man(brand.pyeongEfficiency)}<span className="ml-0.5 text-[9px] font-semibold text-slate-400">만</span>
+            {man(brand.pyeongEfficiency * 10)}<span className="ml-0.5 text-[9px] font-semibold text-slate-400">천원</span>
           </p>
           <p className={`text-[10px] font-bold tabular ${locked ? 'text-slate-400' : 'text-slate-600'}`}>
             <span className="mr-0.5 font-semibold text-slate-400">수수료율</span>{brand.commissionRate}%
@@ -2665,7 +2855,7 @@ function BrandRow({ row, selected, sortKey, onSelect, onDragStartZone, onDragEnd
           {growthText(g)}
         </span>
         <span className={sortKey === 'efficiency' ? 'text-slate-900' : 'text-slate-500'}>
-          {`${man(Math.round(row.efficiency / 1e4))}만/평`}
+          {`${man(Math.round(row.efficiency / 1e3))}천원/평`}
         </span>
         <span className={sortKey === 'pyeong' ? 'text-slate-900' : 'text-slate-500'}>{`${row.pyeong}평`}</span>
         <span className={sortKey === 'profitRate' ? 'text-slate-900' : 'text-slate-500'}>{`${row.profitRate}%`}</span>
@@ -2868,7 +3058,7 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
   const canEdit = Boolean(metric && metric.editable);
   // 편집기 입력 단위 → 원 단위 배율 (무변경 판정에 쓴다)
   const editScale = metric && metric.unit === 'won' ? 1e8
-    : metric && metric.unit === 'wonPerPyeong' ? 1e4
+    : metric && metric.unit === 'wonPerPyeong' ? 1e3
       : 1;
 
   // 지시서 Task 7-2 — 편집 진입이 구역 선택으로 번지면 안 된다.
@@ -2933,7 +3123,7 @@ function InlineValue({ row, metricKey, value, onCommit, onSelectZone }) {
               setErrorText('');
             }
           }}
-          aria-label={`${row.name} ${metric ? metric.label : ''} 수정 (단위 ${metric && metric.unit === 'won' ? '억' : metric && metric.unit === 'wonPerPyeong' ? '만원' : metric && metric.unit === 'percent' ? '%' : '평'})`}
+          aria-label={`${row.name} ${metric ? metric.label : ''} 수정 (단위 ${metric && metric.unit === 'won' ? '억' : metric && metric.unit === 'wonPerPyeong' ? '천원' : metric && metric.unit === 'percent' ? '%' : '평'})`}
           aria-invalid={invalid}
         />
         {errorText ? (
@@ -3168,6 +3358,9 @@ function App() {
   const [parseError, setParseError] = useState(null);
   // 업로드 6단계 플로우 (지시서 Task 4) — 파싱 결과를 모달로 확인한 뒤 적용한다
   const [uploadAsk, setUploadAsk] = useState(null); // { name, zoneCount, areaSum, labels, out, file }
+  // 백데이터(엑셀·CSV) 확인 모달 — 적용 전에 행 수·구역 수를 보여준다
+  const [dataAsk, setDataAsk] = useState(null);
+  const [dataBusy, setDataBusy] = useState(false);
   const [showZones, setShowZones] = useState(true);
   const [showTrace, setShowTrace] = useState(true);
   const [showBg, setShowBg] = useState(true);     // 원본 도면 배경 표시 여부
@@ -3205,6 +3398,7 @@ function App() {
   const [editedZones, setEditedZones] = useState({});     // { Z-01: true }
   const pulseTimer = useRef(null);
   const fileRef = useRef(null);
+  const dataFileRef = useRef(null);
   const planUrlRef = useRef(null);
 
   const [baseline, setBaseline] = useState(() => metricsOf(ZONES_BASE));
@@ -3868,6 +4062,81 @@ function App() {
     ev.target.value = '';
   }, [loadPlanFile]);
 
+  /** 백데이터(엑셀·CSV) 선택 — 파싱만 하고 반영은 모달에서 확인 후 */
+  const handlePickData = useCallback(async (ev) => {
+    const file = ev.target.files && ev.target.files[0];
+    ev.target.value = '';
+    if (!file) return;
+    if (file.size > 40 * 1024 * 1024) {
+      notify('파일이 40MB를 넘습니다 — 더 작은 파일을 쓰세요');
+      return;
+    }
+    setDataBusy(true);
+    try {
+      const parsed = await parseDataWorkbook(file);
+      const preview = zonesFromDataRecords(parsed.records, zones);
+      if (!preview.zones.length) throw new Error('표의 행을 구역에 배정하지 못했습니다');
+      setDataAsk({ file, sheetName: parsed.sheetName, rowCount: parsed.records.length, skipped: parsed.skipped, preview });
+    } catch (err) {
+      notify(String((err && err.message) || err));
+    } finally {
+      setDataBusy(false);
+    }
+  }, [notify, zones]);
+
+  /** 백데이터 반영 — 한 번에 되돌릴 수 있게 스냅숏을 남긴다 */
+  const applyDataUpload = useCallback((ask) => {
+    const before = {
+      zones: cloneZoneList(zones),
+      editedZones: { ...editedZones },
+      baseline,
+    };
+    const next = ask.preview.zones;
+    setZones(cloneZoneList(next));
+    setBaseline(metricsOf(next));
+    setSelectedZoneId(null);
+    setEditedZones({});
+    setDataAsk(null);
+    notify(`백데이터 적용 · 구역 ${next.length}개`, {
+      label: '되돌리기 ↺',
+      run: () => {
+        setZones(before.zones);
+        setEditedZones(before.editedZones);
+        setBaseline(before.baseline);
+        notify('직전 데이터로 되돌렸습니다');
+      },
+    });
+  }, [zones, editedZones, baseline, notify]);
+
+  /** 현재 구역 데이터를 CSV 양식으로 내려받는다 (엑셀에서 바로 열린다) */
+  const downloadDataTemplate = useCallback(() => {
+    const head = ['구역ID', '브랜드', '카테고리', '평수', '전년매출(억)', '금년매출(억)', '평효율(천원)', '수수료율(%)', '이익율(%)'];
+    const lines = [head.join(',')];
+    (zones.length ? zones : ZONES_BASE).forEach((z) => {
+      const b = z.currentBrand || {};
+      lines.push([
+        z.id,
+        b.name || '',
+        b.category || '',
+        z.area,
+        b.salesPrev ? (b.salesPrev / 1e8) : '',
+        b.salesCurr ? (b.salesCurr / 1e8) : '',
+        b.pyeongEfficiency ? Math.round(b.pyeongEfficiency * 10) : '',
+        b.commissionRate || '',
+        b.profitRate || '',
+      ].join(','));
+    });
+    const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement('a');
+    a.href = url;
+    a.download = 'MD_백데이터_양식.csv';
+    document.body.appendChild(a);
+    a.click();
+    a.remove();
+    setTimeout(() => URL.revokeObjectURL(url), 1000);
+  }, [zones]);
+
   const handleClearPlan = useCallback(() => {
     if (planUrlRef.current) { URL.revokeObjectURL(planUrlRef.current); planUrlRef.current = null; }
     setPlan(null);
@@ -4039,11 +4308,11 @@ function App() {
           <KpiCapsule
             label="평균 평효율"
             value={man(currentMetrics.eff)}
-            unit="만/평"
+            unit="천원/평"
             delta={deltaEff}
-            deltaUnit="만"
+            deltaUnit="천원"
             digits={0}
-            footnote={`기준 ${man(baseline.eff)}만`}
+            footnote={`기준 ${man(baseline.eff)}천원`}
           />
           <KpiCapsule
             label="총 이익액"
@@ -4105,6 +4374,34 @@ function App() {
                   도면 업로드
                 </label>
                 <span className="hidden shrink-0 text-[10px] font-semibold text-slate-400 xl:inline">DWG·DXF·SVG / 40MB</span>
+
+                {/* 백데이터(엑셀·CSV) 업로드 — 매출·평수 같은 수치를 표에서 읽어온다 */}
+                <input
+                  ref={dataFileRef}
+                  id="data-file-input"
+                  type="file"
+                  accept=".xlsx,.xls,.csv"
+                  onChange={handlePickData}
+                  className="peer sr-only"
+                  aria-label="백데이터 파일 선택"
+                />
+                <label
+                  htmlFor="data-file-input"
+                  title="백데이터 업로드: XLSX · XLS · CSV · 최대 40MB"
+                  className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[#1E3A8A]"
+                >
+                  <Icon name="Table" size={12} />
+                  {dataBusy ? '읽는 중…' : '데이터 업로드'}
+                </label>
+                <button
+                  type="button"
+                  onClick={downloadDataTemplate}
+                  title="현재 데이터를 엑셀에서 열 수 있는 CSV 양식으로 내려받습니다"
+                  className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
+                >
+                  <Icon name="Download" size={12} />
+                  양식
+                </button>
 
                 <button
                   type="button"
@@ -4452,6 +4749,78 @@ function App() {
       ) : null}
 
       {/* 업로드 3~4단계 — 적용 전 확인 모달 (지시서 Task 4) */}
+      {dataAsk ? (
+        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 px-4">
+          <div
+            role="dialog"
+            aria-modal="true"
+            aria-labelledby="data-dialog-title"
+            className="w-full max-w-[460px] rounded-2xl border border-slate-200 bg-white p-5 shadow-lift"
+          >
+            <div className="flex items-start gap-3">
+              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-700">
+                <Icon name="Table" size={15} stroke={2.4} />
+              </span>
+              <div className="min-w-0">
+                <h3 id="data-dialog-title" className="truncate text-[14px] font-black tracking-tight text-slate-900">백데이터 확인</h3>
+                <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-500">{dataAsk.file.name} · {dataAsk.sheetName}</p>
+              </div>
+            </div>
+
+            <div className="mt-3 grid grid-cols-3 gap-2">
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[10px] font-bold text-slate-400">읽은 행</p>
+                <p className="text-[15px] font-black tabular text-slate-900">{dataAsk.rowCount}개</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[10px] font-bold text-slate-400">배정 구역</p>
+                <p className="text-[15px] font-black tabular text-slate-900">{dataAsk.preview.zones.length}개</p>
+              </div>
+              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
+                <p className="text-[10px] font-bold text-slate-400">건너뜀</p>
+                <p className="text-[15px] font-black tabular text-slate-900">{dataAsk.skipped.length}개</p>
+              </div>
+            </div>
+
+            <p className="mt-3 text-[10.5px] font-black text-slate-500">반영될 값 (미리보기)</p>
+            <ul className="custom-scrollbar mt-1 max-h-[150px] space-y-0.5 overflow-y-auto rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-[10.5px] font-semibold text-slate-600">
+              {dataAsk.preview.zones.map((z) => (
+                <li key={`dq-${z.id}`} className="flex items-center justify-between gap-2">
+                  <span className="truncate">{z.id} · {z.currentBrand.name}</span>
+                  <span className="shrink-0 tabular text-slate-500">{moneyShort(z.currentBrand.salesCurr)} / {z.area}평</span>
+                </li>
+              ))}
+            </ul>
+            {dataAsk.preview.extra.length ? (
+              <p className="mt-1 text-[10px] font-semibold text-amber-700">
+                배정되지 않은 행 {dataAsk.preview.extra.length}개는 무시됩니다 (내장 도면 {zones.length}칸 기준)
+              </p>
+            ) : null}
+
+            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-relaxed text-amber-800">
+              적용하면 현재 표시된 수치가 표 값으로 바뀝니다. 도면 형상은 그대로 두고 값만 갱신합니다.
+            </p>
+
+            <div className="mt-4 flex items-center justify-end gap-2">
+              <button
+                type="button"
+                onClick={() => setDataAsk(null)}
+                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11.5px] font-bold text-slate-600 transition hover:bg-slate-50 active:scale-95"
+              >
+                취소
+              </button>
+              <button
+                type="button"
+                onClick={() => applyDataUpload(dataAsk)}
+                className="rounded-lg bg-slate-900 px-3 py-2 text-[11.5px] font-black text-white transition hover:bg-slate-800 active:scale-95"
+              >
+                적용하기
+              </button>
+            </div>
+          </div>
+        </div>
+      ) : null}
+
       {uploadAsk ? (
         <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 px-4">
           <div
