@@ -1348,7 +1348,7 @@ const ZONES_BASE = [
     id: 'Z-01', area: 35, status: '우수',
     locationType: '북서측 원형광장 부채꼴 파사드',
     currentBrand: {
-      name: '바샤커피 (Bacha)', category: '카페',
+      name: '브랜드 K', category: '카페',
       pyeongEfficiency: 2400, commissionRate: 18,
       salesCurr: 840000000, salesPrev: 750000000, profitRate: 22,
     },
@@ -1362,7 +1362,7 @@ const ZONES_BASE = [
     id: 'Z-02', area: 20, status: '부진',
     locationType: '북동측 사선 챔퍼',
     currentBrand: {
-      name: '올드 베이커리', category: '베이커리',
+      name: '브랜드 L', category: '베이커리',
       pyeongEfficiency: 980, commissionRate: 15,
       salesCurr: 196000000, salesPrev: 214000000, profitRate: 11,
     },
@@ -1376,7 +1376,7 @@ const ZONES_BASE = [
     id: 'Z-03', area: 25, status: '부진',
     locationType: '서측 사선 평행사변형 스트리트',
     currentBrand: {
-      name: '아메리칸 샌드위치', category: '델리',
+      name: '브랜드 M', category: '델리',
       pyeongEfficiency: 920, commissionRate: 21,
       salesCurr: 230000000, salesPrev: 237600000, profitRate: 13,
     },
@@ -1390,7 +1390,7 @@ const ZONES_BASE = [
     id: 'Z-04', area: 15, status: '부진',
     locationType: '중앙 코어 보이드 유선형 아일랜드',
     currentBrand: {
-      name: '전통 모나카 부티크', category: '디저트',
+      name: '브랜드 N', category: '디저트',
       pyeongEfficiency: 850, commissionRate: 20,
       salesCurr: 127500000, salesPrev: 122500000, profitRate: 16,
     },
@@ -1405,7 +1405,7 @@ const ZONES_BASE = [
     id: 'Z-05', area: 40, status: '보통',
     locationType: '남서측 L자형 대형 식당가',
     currentBrand: {
-      name: '고든램지 스트리트 버거', category: '다이닝',
+      name: '브랜드 O', category: '다이닝',
       pyeongEfficiency: 1750, commissionRate: 19,
       salesCurr: 700000000, salesPrev: 681600000, profitRate: 17,
     },
@@ -1419,7 +1419,7 @@ const ZONES_BASE = [
     id: 'Z-06', area: 65, status: '앵커',
     locationType: '남동측 에비뉴엘 연결 사다리꼴',
     currentBrand: {
-      name: '레피세리 와인 & 마켓', category: '주류/식품',
+      name: '브랜드 P', category: '주류/식품',
       pyeongEfficiency: 1400, commissionRate: 14,
       salesCurr: 910000000, salesPrev: 968000000, profitRate: 9,
     },
@@ -1432,12 +1432,16 @@ const ZONES_BASE = [
 ];
 
 const CANDIDATES = [
-  { id: 'C-01', name: '런던베이글뮤지엄', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, profitRate: 19, growthRate: 34.2, tag: '평일 오전 매출 비중 41%' },
-  { id: 'C-02', name: '노티드 월드', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, profitRate: 21, growthRate: 18.5, tag: '재방문율 38% · 객단가 1.8만' },
-  { id: 'C-03', name: '삐아프 쇼콜라', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, profitRate: 26, growthRate: 9.4, tag: '선물 세트 매출 비중 46%' },
-  { id: 'C-04', name: '땀땀 (TamTam)', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, profitRate: 15, growthRate: -2.1, tag: '시간당 회전 2.4회' },
-  { id: 'C-05', name: '카멜커피', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, profitRate: 18, growthRate: 24.8, tag: '테이크아웃 비중 58%' },
-  { id: 'C-06', name: '트러플 아티장 델리', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, profitRate: 28, growthRate: 6.7, tag: '주류 동반 구매 31%' },
+  { id: 'C-01', name: '브랜드 A', category: '베이커리', pyeongEfficiency: 3500, commissionRate: 16, profitRate: 19, growthRate: 34.2, tag: '평일 오전 매출 비중 41%' },
+  { id: 'C-02', name: '브랜드 B', category: '디저트', pyeongEfficiency: 2700, commissionRate: 18, profitRate: 21, growthRate: 18.5, tag: '재방문율 38% · 객단가 1.8만' },
+  { id: 'C-03', name: '브랜드 C', category: '디저트', pyeongEfficiency: 2900, commissionRate: 22, profitRate: 26, growthRate: 9.4, tag: '선물 세트 매출 비중 46%' },
+  { id: 'C-04', name: '브랜드 D', category: '다이닝', pyeongEfficiency: 2200, commissionRate: 20, profitRate: 15, growthRate: -2.1, tag: '시간당 회전 2.4회' },
+  { id: 'C-05', name: '브랜드 E', category: '카페', pyeongEfficiency: 2600, commissionRate: 21, profitRate: 18, growthRate: 24.8, tag: '테이크아웃 비중 58%' },
+  { id: 'C-06', name: '브랜드 F', category: '델리', pyeongEfficiency: 2300, commissionRate: 23, profitRate: 28, growthRate: 6.7, tag: '주류 동반 구매 31%' },
+  { id: 'C-07', name: '브랜드 G', category: '주류/식품', pyeongEfficiency: 2050, commissionRate: 17, profitRate: 20, growthRate: 11.3, tag: '저녁 매출 비중 52%' },
+  { id: 'C-08', name: '브랜드 H', category: '카페', pyeongEfficiency: 3100, commissionRate: 19, profitRate: 17, growthRate: 27.6, tag: '오전 피크 집중 39%' },
+  { id: 'C-09', name: '브랜드 I', category: '베이커리', pyeongEfficiency: 2450, commissionRate: 20, profitRate: 24, growthRate: 4.8, tag: '예약 주문 비중 33%' },
+  { id: 'C-10', name: '브랜드 J', category: '다이닝', pyeongEfficiency: 1980, commissionRate: 22, profitRate: 13, growthRate: -6.4, tag: '주말 매출 비중 47%' },
 ];
 
 const CAT_TAG = {
