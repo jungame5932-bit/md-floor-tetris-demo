@@ -1857,6 +1857,58 @@ const cloneZoneList = (list) => (list || []).map((z) => ({
   originBrand: { ...(z.originBrand || z.currentBrand) },
 }));
 
+/* ---------------- 로컬 저장 ----------------
+ * 새로고침해도 고친 값이 남게 localStorage 에 스냅숏을 둔다.
+ * 저장 대상은 '값'뿐이다: 도면 배경 이미지(blob URL)는 복원할 수 없으므로 넣지 않는다.
+ * 복원할 때는 합계를 반드시 다시 계산한다 — 저장된 합계를 그대로 믿으면
+ * 지도에 보이는 브랜드와 상단 KPI 가 어긋난다(11/17 실제 발생).
+ */
+const STORE_KEY = 'mdft.sheet.v1';
+
+function loadSavedZones() {
+  try {
+    const raw = window.localStorage.getItem(STORE_KEY);
+    if (!raw) return null;
+    const data = JSON.parse(raw);
+    if (!data || data.v !== 1 || !Array.isArray(data.zones) || !data.zones.length) return null;
+    // 형상이 없는 행은 버린다 — 그리다 만 상태로 시작하면 화면이 빈다
+    const usable = data.zones.filter((z) => z && z.id && z.currentBrand
+      && (typeof z.path === 'string' || Array.isArray(z.pts)));
+    if (!usable.length) return null;
+    return { zones: cloneZoneList(usable), editedZones: data.editedZones || {} };
+  } catch (err) {
+    return null;
+  }
+}
+
+function saveZones(zones, editedZones) {
+  try {
+    window.localStorage.setItem(STORE_KEY, JSON.stringify({
+      v: 1,
+      savedAt: Date.now(),
+      zones: zones.map((z) => ({
+        id: z.id,
+        area: z.area,
+        status: z.status,
+        locationType: z.locationType,
+        path: z.path,
+        pts: z.pts,
+        center: z.center,
+        labelWidth: z.labelWidth,
+        isReplaced: z.isReplaced,
+        currentBrand: z.currentBrand,
+      })),
+      editedZones,
+    }));
+  } catch (err) {
+    // 저장 공간이 없거나 차단된 브라우저 — 앱은 그대로 돌아야 한다
+  }
+}
+
+function clearSavedZones() {
+  try { window.localStorage.removeItem(STORE_KEY); } catch (err) { /* 무시 */ }
+}
+
 /** 후보 브랜드를 특정 평수 구역에 놓을 때의 브랜드 객체 */
 function brandForZone(cand, area) {
   const curr = Math.round(area * cand.pyeongEfficiency * 1e4);
@@ -3036,6 +3088,7 @@ function BackDataDialog({ sheet, busy, onCell, onPickFile, onDownload, onApply, 
           매출은 <span className="font-black text-slate-700">억</span>, 평효율은 <span className="font-black text-slate-700">천원/평</span>입니다.
           표에 없는 구역은 그대로 두고, 도면 형상도 바뀌지 않습니다.
           {changed ? <span className="ml-1 font-black text-blue-700">수정 {changed}칸</span> : null}
+          <span className="mt-1 block text-[10px] text-slate-400">적용한 값은 이 브라우저에 자동 저장되어 새로고침해도 남습니다. 다른 기기와는 공유되지 않습니다.</span>
         </p>
 
         <div className="mt-3 flex items-center justify-end gap-2">
@@ -3558,7 +3611,11 @@ function RankingDashboard({
 }
 
 function App() {
-  const [zones, setZones] = useState(cloneBase);
+  // 저장된 값이 있으면 그 상태로 시작한다. 없으면 내장 도면.
+  const saved = useRef(null);
+  if (saved.current === null) saved.current = loadSavedZones() || false;
+  const boot = saved.current || null;
+  const [zones, setZones] = useState(() => (boot ? cloneZoneList(boot.zones) : cloneBase()));
   const [selectedCandidate, setSelectedCandidate] = useState(null);
   const [hoveredZoneId, setHoveredZoneId] = useState(null);
   // 토스트는 두 슬롯으로 나눈다. 되돌리기(action)는 일반 안내(notice)에 덮이지 않아야 한다.
@@ -3612,13 +3669,13 @@ function App() {
   const [pulseZone, setPulseZone] = useState(null);
   const [areaMode, setAreaMode] = useState('efficiency'); // 'efficiency' | 'absolute'
   const [editingAny, setEditingAny] = useState(false);
-  const [editedZones, setEditedZones] = useState({});     // { Z-01: true }
+  const [editedZones, setEditedZones] = useState(() => ({ ...((boot && boot.editedZones) || {}) })); // { Z-01: true }
   const pulseTimer = useRef(null);
   const fileRef = useRef(null);
   const dataFileRef = useRef(null);
   const planUrlRef = useRef(null);
 
-  const [baseline, setBaseline] = useState(() => metricsOf(ZONES_BASE));
+  const [baseline, setBaseline] = useState(() => (boot ? metricsOf(boot.zones) : metricsOf(ZONES_BASE)));
   // 업로드 도면에서 만든 구역 원본 — 리셋은 여기로 되돌아가야 한다
   const [planZones, setPlanZones] = useState(null);
   /* 도면에 그리는 행, 상단 KPI, 후보 잠금 상태는 모두 같은 zones 스냅숏에서 나와야 한다.
@@ -3659,6 +3716,17 @@ function App() {
   useEffect(() => () => {
     if (planUrlRef.current) URL.revokeObjectURL(planUrlRef.current);
   }, []);
+
+  /* 자동 저장 — 값이 바뀔 때마다 이 기기에 남긴다.
+     업로드한 도면으로 만든 구역은 저장하지 않는다: 배경 이미지(blob)는 복원할 수 없어서
+     새로고침 후 형체만 남고 도면이 사라진 화면이 된다. 그 경우엔 저장본을 지운다. */
+  useEffect(() => {
+    const timer = setTimeout(() => {
+      if (planZones) { clearSavedZones(); return; }
+      saveZones(zones, editedZones);
+    }, 400);
+    return () => clearTimeout(timer);
+  }, [zones, editedZones, planZones]);
 
   const notify = useCallback((message, action) => {
     if (action) {
@@ -4456,6 +4524,10 @@ function App() {
     setHoveredZoneId(null);
     setEditedZones({});
     setPulseZone(null);
+
+    // 저장본도 함께 되돌린다 — 화면만 초기화하면 새로고침 때 옛 값이 되살아난다
+    if (planZones) clearSavedZones();
+    else saveZones(cloneBase(), {});
 
     const target = planZones && planZones.length
       ? `도면 구획 ${planZones.length}개`
