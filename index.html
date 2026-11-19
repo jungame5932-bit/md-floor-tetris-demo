@@ -1561,6 +1561,67 @@ function zonesFromDataRecords(records, baseZones) {
   const zones = base.map((z) => byZoneId[z.id] || z);
   return { zones, extra, matched: matched.length };
 }
+
+/* ---------------- 백데이터 표 (편집 가능) ----------------
+ * 화면 단위는 사용자가 읽는 단위 그대로 쓴다: 매출 억, 평효율 천원/평, 비율 %.
+ * 저장 단위(원, 만원/평)와 섞이지 않도록 변환은 이 두 함수 안에서만 한다.
+ */
+const sheetNum = (v, fallback) => {
+  const n = typeof v === 'number' ? v : Number(String(v == null ? '' : v).replace(/,/g, '').trim());
+  return Number.isFinite(n) ? n : fallback;
+};
+const sheetRate = (v) => Math.min(100, Math.max(0, sheetNum(v, 0)));
+const sheetEff = (salesWon, area) => (area > 0 ? Math.round(salesWon / area / 1e3) : 0);
+
+/** 구역 목록 → 표 행 */
+function sheetRowsFromZones(list) {
+  return (list || []).map((z) => {
+    const b = z.currentBrand || {};
+    const area = z.area > 0 ? z.area : 1;
+    const salesCurr = Number.isFinite(b.salesCurr) ? b.salesCurr : Math.round(area * (b.pyeongEfficiency || 0) * 1e4);
+    const salesPrev = Number.isFinite(b.salesPrev) ? b.salesPrev : 0;
+    return {
+      id: z.id,
+      name: b.name || '',
+      category: b.category || '',
+      area: String(area),
+      salesPrev: salesPrev ? String(+((salesPrev / 1e8).toFixed(4))) : '',
+      salesCurr: String(+((salesCurr / 1e8).toFixed(4))),
+      eff: String(sheetEff(salesCurr, area)),
+      commission: b.commissionRate == null ? '' : String(b.commissionRate),
+      profit: b.profitRate == null ? '' : String(b.profitRate),
+    };
+  });
+}
+
+/** 표 행 → 구역. 도면 형상·라벨 배치는 그대로 두고 값만 갈아끼운다. */
+function zonesFromSheetRows(rows, base) {
+  return (base || []).map((geo) => {
+    const row = (rows || []).find((r) => r.id === geo.id);
+    if (!row) return geo;
+    const src = geo.currentBrand || {};
+    const area = Math.max(1, Math.round(sheetNum(row.area, geo.area || 1)));
+    const salesWon = Math.max(0, Math.round(sheetNum(row.salesCurr, 0) * 1e8));
+    const prevWon = Math.max(0, Math.round(sheetNum(row.salesPrev, 0) * 1e8));
+    // 매출이 있으면 평효율은 매출에서 다시 센다 — 둘이 어긋난 표가 들어와도 화면은 한 값만 갖는다.
+    const effWon = salesWon > 0 ? sheetEff(salesWon, area) : Math.round(sheetNum(row.eff, 0));
+    return {
+      ...geo,
+      area,
+      currentBrand: {
+        name: row.name || src.name || '',
+        category: row.category || src.category || '',
+        pyeongEfficiency: Math.round(effWon / 10),
+        commissionRate: sheetRate(row.commission),
+        salesCurr: salesWon,
+        salesPrev: prevWon,
+        profitRate: sheetRate(row.profit),
+      },
+      isReplaced: false,
+    };
+  });
+}
+
 // 내장 도면은 실제로 그려지는 영역( x 70~920 · y 110~580 )에 맞춰 잘라 보여준다.
 // 업로드 도면은 letterbox 계산이 VIEWBOX 전체를 쓰므로 전체 뷰를 유지한다 (지시서 Task 7-3).
 const PLAN_TIGHT_VIEW = { x: -38, y: 100, w: 1076, h: 484 };
@@ -2865,11 +2926,145 @@ function BrandRow({ row, selected, sortKey, onSelect, onDragStartZone, onDragEnd
   );
 }
 
+/* ---------------- 백데이터 편집 팝업 ----------------
+ * 값을 읽기만 하는 확인창이 아니라 표에서 직접 고친다.
+ * 표에 없는 구역은 건드리지 않고, 적용은 한 번에 되돌릴 수 있다.
+ */
+const SHEET_COLUMNS = [
+  { key: 'id', label: '구역', w: 'w-[52px]', read: true, align: 'left' },
+  { key: 'name', label: '브랜드', w: 'w-[112px]', align: 'left' },
+  { key: 'category', label: '카테고리', w: 'w-[64px]', align: 'left' },
+  { key: 'area', label: '평수', w: 'w-[46px]', align: 'right' },
+  { key: 'salesPrev', label: '전년(억)', w: 'w-[62px]', align: 'right' },
+  { key: 'salesCurr', label: '금년(억)', w: 'w-[62px]', align: 'right' },
+  { key: 'eff', label: '평효율(천원)', w: 'w-[76px]', align: 'right' },
+  { key: 'commission', label: '수수료%', w: 'w-[52px]', align: 'right' },
+  { key: 'profit', label: '이익율%', w: 'w-[52px]', align: 'right' },
+];
+
+function BackDataDialog({ sheet, busy, onCell, onPickFile, onDownload, onApply, onClose, fileRef }) {
+  const rows = sheet.rows;
+  const changed = rows.filter((r) => r.dirty).length;
+  return (
+    <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 px-4">
+      <div
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="data-dialog-title"
+        className="flex max-h-[86vh] w-full max-w-[880px] flex-col rounded-2xl border border-slate-200 bg-white p-5 shadow-lift"
+      >
+        <div className="flex items-start gap-3">
+          <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-700">
+            <Icon name="Table" size={15} stroke={2.4} />
+          </span>
+          <div className="min-w-0 flex-1">
+            <h3 id="data-dialog-title" className="truncate text-[14px] font-black tracking-tight text-slate-900">백데이터</h3>
+            <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-500">
+              {sheet.fileName ? `${sheet.fileName} · ${sheet.sheetName}` : '현재 화면 값'} · 칸을 눌러 직접 고칠 수 있습니다
+            </p>
+          </div>
+          <input
+            ref={fileRef}
+            id="data-file-input"
+            type="file"
+            accept=".xlsx,.xls,.csv"
+            onChange={onPickFile}
+            className="peer sr-only"
+            aria-label="백데이터 파일 선택"
+          />
+          <label
+            htmlFor="data-file-input"
+            title="엑셀·CSV 파일을 읽어 표를 채웁니다"
+            className="flex shrink-0 cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[#1E3A8A]"
+          >
+            <Icon name="Upload" size={12} />
+            {busy ? '읽는 중…' : '엑셀·CSV 불러오기'}
+          </label>
+          <button
+            type="button"
+            onClick={onDownload}
+            title="지금 표를 CSV 양식으로 내려받습니다"
+            className="flex shrink-0 items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-600 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
+          >
+            <Icon name="Download" size={12} />
+            양식
+          </button>
+        </div>
+
+        <div className="custom-scrollbar mt-3 min-h-0 flex-1 overflow-auto rounded-xl border border-slate-200">
+          <table className="w-full border-collapse text-[11px]">
+            <thead className="sticky top-0 z-10 bg-slate-50">
+              <tr>
+                {SHEET_COLUMNS.map((c) => (
+                  <th
+                    key={c.key}
+                    scope="col"
+                    className={`${c.w} whitespace-nowrap border-b border-slate-200 px-2 py-1.5 font-black text-slate-500 ${c.align === 'right' ? 'text-right' : 'text-left'}`}
+                  >
+                    {c.label}
+                  </th>
+                ))}
+              </tr>
+            </thead>
+            <tbody>
+              {rows.map((row) => (
+                <tr key={row.id} className="border-b border-slate-100 last:border-b-0">
+                  {SHEET_COLUMNS.map((c) => (
+                    <td key={c.key} className={`${c.w} p-0 align-middle`}>
+                      {c.read ? (
+                        <span className="block px-2 py-1 font-black text-slate-500">{row[c.key]}</span>
+                      ) : (
+                        <input
+                          value={row[c.key]}
+                          onChange={(ev) => onCell(row.id, c.key, ev.target.value)}
+                          aria-label={`${row.id} ${c.label}`}
+                          inputMode={c.key === 'name' || c.key === 'category' ? 'text' : 'decimal'}
+                          className={`block w-full bg-transparent px-2 py-1 font-semibold text-slate-800 outline-none transition focus:bg-blue-50 focus:ring-2 focus:ring-inset focus:ring-[#1E3A8A] ${
+                            c.align === 'right' ? 'text-right tabular' : 'text-left'
+                          } ${row.dirty ? 'bg-amber-50/60' : ''}`}
+                        />
+                      )}
+                    </td>
+                  ))}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+
+        <p className="mt-2 text-[10.5px] font-semibold leading-relaxed text-slate-500">
+          매출은 <span className="font-black text-slate-700">억</span>, 평효율은 <span className="font-black text-slate-700">천원/평</span>입니다.
+          표에 없는 구역은 그대로 두고, 도면 형상도 바뀌지 않습니다.
+          {changed ? <span className="ml-1 font-black text-blue-700">수정 {changed}칸</span> : null}
+        </p>
+
+        <div className="mt-3 flex items-center justify-end gap-2">
+          <button
+            type="button"
+            onClick={onClose}
+            className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11.5px] font-bold text-slate-600 transition hover:bg-slate-50 active:scale-95"
+          >
+            취소
+          </button>
+          <button
+            type="button"
+            onClick={onApply}
+            className="rounded-lg bg-slate-900 px-3 py-2 text-[11.5px] font-black text-white transition hover:bg-slate-800 active:scale-95"
+          >
+            적용하기
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 function BrandListPanel({
   rows, visibleRows, query, onQuery, sortKey, onSortKey, sortDir, onToggleDir,
   selectedZoneId, onSelect, tab, onTab,
   candidates, selectedCandidate, usedCounts, occupiedBy, onSelectCandidate,
   onDragStart, onDragEndZone, onCandidateDragStart, onCandidateDragEnd,
+  onOpenData, onDownloadTemplate, dataBusy,
 }) {
   // 교체 후보 탭 전용 검색 (브랜드명·업종)
   const [candQuery, setCandQuery] = React.useState('');
@@ -2900,6 +3095,28 @@ function BrandListPanel({
         >
           교체 후보
           <span className="ml-1 text-[10px] font-bold text-slate-400">{candidates.length}</span>
+        </button>
+      </div>
+
+      {/* 백데이터 입구 — 브랜드 목록 옆에 둔다. 누르면 파일 선택이 아니라 편집 표가 열린다. */}
+      <div className="flex shrink-0 items-center gap-1.5 border-b border-slate-100 px-3 py-2">
+        <button
+          type="button"
+          onClick={onOpenData}
+          title="매출·평수 같은 백데이터를 표에서 직접 확인하고 고칩니다"
+          className="flex min-w-0 flex-1 items-center justify-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
+        >
+          <Icon name="Table" size={12} />
+          <span className="truncate">{dataBusy ? '읽는 중…' : '백데이터'}</span>
+        </button>
+        <button
+          type="button"
+          onClick={onDownloadTemplate}
+          title="현재 데이터를 엑셀에서 열 수 있는 CSV 양식으로 내려받습니다"
+          className="flex shrink-0 items-center gap-1 rounded-lg border border-slate-300 bg-white px-2 py-1.5 text-[11px] font-bold text-slate-600 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
+        >
+          <Icon name="Download" size={12} />
+          양식
         </button>
       </div>
 
@@ -3358,8 +3575,8 @@ function App() {
   const [parseError, setParseError] = useState(null);
   // 업로드 6단계 플로우 (지시서 Task 4) — 파싱 결과를 모달로 확인한 뒤 적용한다
   const [uploadAsk, setUploadAsk] = useState(null); // { name, zoneCount, areaSum, labels, out, file }
-  // 백데이터(엑셀·CSV) 확인 모달 — 적용 전에 행 수·구역 수를 보여준다
-  const [dataAsk, setDataAsk] = useState(null);
+  // 백데이터 편집 팝업 — 열면 현재 값을 표로 만들고, 칸을 고쳐서 적용한다
+  const [sheet, setSheet] = useState(null); // { rows, fileName, sheetName }
   const [dataBusy, setDataBusy] = useState(false);
   const [showZones, setShowZones] = useState(true);
   const [showTrace, setShowTrace] = useState(true);
@@ -4062,7 +4279,43 @@ function App() {
     ev.target.value = '';
   }, [loadPlanFile]);
 
-  /** 백데이터(엑셀·CSV) 선택 — 파싱만 하고 반영은 모달에서 확인 후 */
+  /** 백데이터 팝업 열기 — 파일 선택이 아니라 현재 값 표를 먼저 보여준다 */
+  const openDataSheet = useCallback(() => {
+    setSheet({
+      rows: sheetRowsFromZones(zones).map((r) => ({ ...r, dirty: false })),
+      fileName: null,
+      sheetName: null,
+    });
+  }, [zones]);
+
+  /** 표 한 칸 수정 — 숫자 칸은 즉시 계산해 평효율을 다시 맞춘다 */
+  const handleSheetCell = useCallback((zoneId, key, value) => {
+    setSheet((prev) => {
+      if (!prev) return prev;
+      const rows = prev.rows.map((r) => {
+        if (r.id !== zoneId) return r;
+        const next = { ...r, [key]: value, dirty: true };
+        if (key === 'salesCurr') {
+          const area = sheetNum(next.area, 0);
+          const won = sheetNum(value, 0) * 1e8;
+          if (area > 0 && won >= 0) next.eff = String(sheetEff(won, area));
+        }
+        if (key === 'area') {
+          const area = sheetNum(value, 0);
+          const won = sheetNum(next.salesCurr, 0) * 1e8;
+          if (area > 0 && won >= 0) next.eff = String(sheetEff(won, area));
+        }
+        if (key === 'eff' && sheetNum(value, 0) > 0) {
+          const area = sheetNum(next.area, 0);
+          if (area > 0) next.salesCurr = String(+((sheetNum(value, 0) * area / 1e4).toFixed(4)));
+        }
+        return next;
+      });
+      return { ...prev, rows };
+    });
+  }, []);
+
+  /** 엑셀·CSV 를 읽어 표를 채운다 (적용은 아직) */
   const handlePickData = useCallback(async (ev) => {
     const file = ev.target.files && ev.target.files[0];
     ev.target.value = '';
@@ -4075,8 +4328,16 @@ function App() {
     try {
       const parsed = await parseDataWorkbook(file);
       const preview = zonesFromDataRecords(parsed.records, zones);
-      if (!preview.zones.length) throw new Error('표의 행을 구역에 배정하지 못했습니다');
-      setDataAsk({ file, sheetName: parsed.sheetName, rowCount: parsed.records.length, skipped: parsed.skipped, preview });
+      const merged = {};
+      preview.zones.forEach((z) => { merged[z.id] = z; });
+      const rows = zones.map((z) => {
+        const src = merged[z.id] || z;
+        const row = sheetRowsFromZones([src])[0];
+        // 표에 있던 구역만 수정 표시 — 안 올라온 구역은 원래 값 그대로다
+        return { ...row, id: z.id, dirty: merged[z.id] ? merged[z.id] !== z : false };
+      });
+      setSheet({ rows, fileName: file.name, sheetName: parsed.sheetName });
+      if (parsed.skipped.length) notify(`읽지 못한 행 ${parsed.skipped.length}개는 건너뛰었습니다`);
     } catch (err) {
       notify(String((err && err.message) || err));
     } finally {
@@ -4084,20 +4345,26 @@ function App() {
     }
   }, [notify, zones]);
 
-  /** 백데이터 반영 — 한 번에 되돌릴 수 있게 스냅숏을 남긴다 */
-  const applyDataUpload = useCallback((ask) => {
+  /** 표 → 화면 반영. 도면 형상은 그대로 두고 값만 갈아끼운다. */
+  const applyDataSheet = useCallback(() => {
+    if (!sheet) return;
     const before = {
       zones: cloneZoneList(zones),
       editedZones: { ...editedZones },
       baseline,
     };
-    const next = ask.preview.zones;
+    const next = zonesFromSheetRows(sheet.rows, zones);
+    const changed = sheet.rows.filter((r) => r.dirty).length;
     setZones(cloneZoneList(next));
     setBaseline(metricsOf(next));
     setSelectedZoneId(null);
-    setEditedZones({});
-    setDataAsk(null);
-    notify(`백데이터 적용 · 구역 ${next.length}개`, {
+    setEditedZones((prev) => {
+      const out = { ...prev };
+      sheet.rows.forEach((r) => { if (r.dirty) out[r.id] = true; });
+      return out;
+    });
+    setSheet(null);
+    notify(changed ? `백데이터 ${changed}칸 수정` : '백데이터를 적용했습니다', {
       label: '되돌리기 ↺',
       run: () => {
         setZones(before.zones);
@@ -4106,25 +4373,19 @@ function App() {
         notify('직전 데이터로 되돌렸습니다');
       },
     });
-  }, [zones, editedZones, baseline, notify]);
+  }, [sheet, zones, editedZones, baseline, notify]);
 
-  /** 현재 구역 데이터를 CSV 양식으로 내려받는다 (엑셀에서 바로 열린다) */
+  /** 지금 표(없으면 화면 값)를 CSV 양식으로 내려받는다 */
   const downloadDataTemplate = useCallback(() => {
     const head = ['구역ID', '브랜드', '카테고리', '평수', '전년매출(억)', '금년매출(억)', '평효율(천원)', '수수료율(%)', '이익율(%)'];
+    const keys = ['id', 'name', 'category', 'area', 'salesPrev', 'salesCurr', 'eff', 'commission', 'profit'];
+    const rows = sheet ? sheet.rows : sheetRowsFromZones(zones);
     const lines = [head.join(',')];
-    (zones.length ? zones : ZONES_BASE).forEach((z) => {
-      const b = z.currentBrand || {};
-      lines.push([
-        z.id,
-        b.name || '',
-        b.category || '',
-        z.area,
-        b.salesPrev ? (b.salesPrev / 1e8) : '',
-        b.salesCurr ? (b.salesCurr / 1e8) : '',
-        b.pyeongEfficiency ? Math.round(b.pyeongEfficiency * 10) : '',
-        b.commissionRate || '',
-        b.profitRate || '',
-      ].join(','));
+    rows.forEach((r) => {
+      lines.push(keys.map((k) => {
+        const v = r[k] == null ? '' : String(r[k]);
+        return /[",\n]/.test(v) ? `"${v.replace(/"/g, '""')}"` : v;
+      }).join(','));
     });
     const blob = new Blob(['\ufeff' + lines.join('\r\n')], { type: 'text/csv;charset=utf-8' });
     const url = URL.createObjectURL(blob);
@@ -4135,7 +4396,7 @@ function App() {
     a.click();
     a.remove();
     setTimeout(() => URL.revokeObjectURL(url), 1000);
-  }, [zones]);
+  }, [sheet, zones]);
 
   const handleClearPlan = useCallback(() => {
     if (planUrlRef.current) { URL.revokeObjectURL(planUrlRef.current); planUrlRef.current = null; }
@@ -4374,34 +4635,6 @@ function App() {
                   도면 업로드
                 </label>
                 <span className="hidden shrink-0 text-[10px] font-semibold text-slate-400 xl:inline">DWG·DXF·SVG / 40MB</span>
-
-                {/* 백데이터(엑셀·CSV) 업로드 — 매출·평수 같은 수치를 표에서 읽어온다 */}
-                <input
-                  ref={dataFileRef}
-                  id="data-file-input"
-                  type="file"
-                  accept=".xlsx,.xls,.csv"
-                  onChange={handlePickData}
-                  className="peer sr-only"
-                  aria-label="백데이터 파일 선택"
-                />
-                <label
-                  htmlFor="data-file-input"
-                  title="백데이터 업로드: XLSX · XLS · CSV · 최대 40MB"
-                  className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[#1E3A8A]"
-                >
-                  <Icon name="Table" size={12} />
-                  {dataBusy ? '읽는 중…' : '데이터 업로드'}
-                </label>
-                <button
-                  type="button"
-                  onClick={downloadDataTemplate}
-                  title="현재 데이터를 엑셀에서 열 수 있는 CSV 양식으로 내려받습니다"
-                  className="flex items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95"
-                >
-                  <Icon name="Download" size={12} />
-                  양식
-                </button>
 
                 <button
                   type="button"
@@ -4691,6 +4924,9 @@ function App() {
             onDragEndZone={() => setDragZoneId(null)}
             onCandidateDragStart={() => setCandidateDrag(true)}
             onCandidateDragEnd={() => setCandidateDrag(false)}
+            onOpenData={openDataSheet}
+            onDownloadTemplate={downloadDataTemplate}
+            dataBusy={dataBusy}
           />
         </div>
 
@@ -4748,77 +4984,18 @@ function App() {
       </div>
       ) : null}
 
-      {/* 업로드 3~4단계 — 적용 전 확인 모달 (지시서 Task 4) */}
-      {dataAsk ? (
-        <div className="fixed inset-0 z-50 flex items-center justify-center bg-slate-900/25 px-4">
-          <div
-            role="dialog"
-            aria-modal="true"
-            aria-labelledby="data-dialog-title"
-            className="w-full max-w-[460px] rounded-2xl border border-slate-200 bg-white p-5 shadow-lift"
-          >
-            <div className="flex items-start gap-3">
-              <span className="mt-0.5 flex h-7 w-7 shrink-0 items-center justify-center rounded-full bg-blue-50 text-blue-700">
-                <Icon name="Table" size={15} stroke={2.4} />
-              </span>
-              <div className="min-w-0">
-                <h3 id="data-dialog-title" className="truncate text-[14px] font-black tracking-tight text-slate-900">백데이터 확인</h3>
-                <p className="mt-0.5 truncate text-[11px] font-semibold text-slate-500">{dataAsk.file.name} · {dataAsk.sheetName}</p>
-              </div>
-            </div>
-
-            <div className="mt-3 grid grid-cols-3 gap-2">
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <p className="text-[10px] font-bold text-slate-400">읽은 행</p>
-                <p className="text-[15px] font-black tabular text-slate-900">{dataAsk.rowCount}개</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <p className="text-[10px] font-bold text-slate-400">배정 구역</p>
-                <p className="text-[15px] font-black tabular text-slate-900">{dataAsk.preview.zones.length}개</p>
-              </div>
-              <div className="rounded-xl border border-slate-200 bg-slate-50 px-3 py-2">
-                <p className="text-[10px] font-bold text-slate-400">건너뜀</p>
-                <p className="text-[15px] font-black tabular text-slate-900">{dataAsk.skipped.length}개</p>
-              </div>
-            </div>
-
-            <p className="mt-3 text-[10.5px] font-black text-slate-500">반영될 값 (미리보기)</p>
-            <ul className="custom-scrollbar mt-1 max-h-[150px] space-y-0.5 overflow-y-auto rounded-xl border border-slate-200 bg-white px-2.5 py-2 text-[10.5px] font-semibold text-slate-600">
-              {dataAsk.preview.zones.map((z) => (
-                <li key={`dq-${z.id}`} className="flex items-center justify-between gap-2">
-                  <span className="truncate">{z.id} · {z.currentBrand.name}</span>
-                  <span className="shrink-0 tabular text-slate-500">{moneyShort(z.currentBrand.salesCurr)} / {z.area}평</span>
-                </li>
-              ))}
-            </ul>
-            {dataAsk.preview.extra.length ? (
-              <p className="mt-1 text-[10px] font-semibold text-amber-700">
-                배정되지 않은 행 {dataAsk.preview.extra.length}개는 무시됩니다 (내장 도면 {zones.length}칸 기준)
-              </p>
-            ) : null}
-
-            <p className="mt-3 rounded-xl border border-amber-200 bg-amber-50 px-3 py-2 text-[11px] font-semibold leading-relaxed text-amber-800">
-              적용하면 현재 표시된 수치가 표 값으로 바뀝니다. 도면 형상은 그대로 두고 값만 갱신합니다.
-            </p>
-
-            <div className="mt-4 flex items-center justify-end gap-2">
-              <button
-                type="button"
-                onClick={() => setDataAsk(null)}
-                className="rounded-lg border border-slate-300 bg-white px-3 py-2 text-[11.5px] font-bold text-slate-600 transition hover:bg-slate-50 active:scale-95"
-              >
-                취소
-              </button>
-              <button
-                type="button"
-                onClick={() => applyDataUpload(dataAsk)}
-                className="rounded-lg bg-slate-900 px-3 py-2 text-[11.5px] font-black text-white transition hover:bg-slate-800 active:scale-95"
-              >
-                적용하기
-              </button>
-            </div>
-          </div>
-        </div>
+      {/* 백데이터 편집 팝업 — 파일을 고르는 게 아니라 표에서 직접 고친다 */}
+      {sheet ? (
+        <BackDataDialog
+          sheet={sheet}
+          busy={dataBusy}
+          fileRef={dataFileRef}
+          onCell={handleSheetCell}
+          onPickFile={handlePickData}
+          onDownload={downloadDataTemplate}
+          onApply={applyDataSheet}
+          onClose={() => setSheet(null)}
+        />
       ) : null}
 
       {uploadAsk ? (
