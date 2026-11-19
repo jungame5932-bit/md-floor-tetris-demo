@@ -506,6 +506,21 @@ window.PlanParser = (function () {
       var ent = entities[e];
       var lay = '0';
       for (var kk = 0; kk < ent.data.length; kk++) if (ent.data[kk][0] === 8) { lay = String(ent.data[kk][1]).trim(); break; }
+
+      // 구형 POLYLINE 은 좌표가 VERTEX 자식들로 쪼개지고 SEQEND 로 끝난다.
+      // DWG→DXF 변환이 이 형식으로 내보내는 경우가 흔해서 여기서 하나로 묶는다.
+      if (ent.type === 'POLYLINE') {
+        var vpts = [];
+        for (var ve = e + 1; ve < entities.length; ve++) {
+          var vt = entities[ve].type;
+          if (vt === 'SEQEND') { e = ve; break; }
+          if (vt !== 'VERTEX') break;
+          vpts.push([fnum(entities[ve], 10), fnum(entities[ve], 20)]);
+        }
+        if (vpts.length >= 2) addPoly(vpts, lay, (fnum(ent, 70) & 1) === 1, 'POLYLINE');
+        continue;
+      }
+
       emit(ent, lay, 0);
     }
 
@@ -1339,6 +1354,23 @@ const { useState, useMemo, useCallback, useEffect, useRef } = React;
  * ================================================================ */
 
 const VIEWBOX = { w: 1000, h: 680 };
+
+/* DWG 는 DXF 처럼 텍스트가 아니라 압축된 바이너리 폐쇄 포맷이라 브라우저가 바로 못 읽는다.
+   libredwg(WASM)로 DWG→DXF 변환한 뒤 기존 DXF 파서에 넘기는 방식으로 지원한다.
+   wasm 이 7.8MB 라 초기 로딩을 막지 않도록, 첫 DWG 업로드 시점에만 CDN에서 받는다. */
+const LIBREDWG_CDN = 'https://cdn.jsdelivr.net/npm/@mlightcad/libredwg-web@0.9.0/dist/libredwg-web.js';
+let dwgLibPromise = null;
+function loadDwgLib() {
+  if (!dwgLibPromise) {
+    dwgLibPromise = import(LIBREDWG_CDN)
+      .then((mod) => mod.LibreDwg.create())
+      .catch(() => {
+        dwgLibPromise = null;
+        throw new Error('DWG 해석 모듈을 불러오지 못했습니다 — 네트워크를 확인하고 다시 시도해 주세요');
+      });
+  }
+  return dwgLibPromise;
+}
 // 내장 도면은 실제로 그려지는 영역( x 70~920 · y 110~580 )에 맞춰 잘라 보여준다.
 // 업로드 도면은 letterbox 계산이 VIEWBOX 전체를 쓰므로 전체 뷰를 유지한다 (지시서 Task 7-3).
 const PLAN_TIGHT_VIEW = { x: -38, y: 100, w: 1076, h: 484 };
@@ -3596,6 +3628,26 @@ function App() {
     const ext = (name.match(/\.([a-z0-9]+)$/i) || [, ''])[1].toLowerCase();
     const VB = { w: 1000, h: 680, pad: 18 };
 
+    // --- DWG ---
+    // DWG 는 바이너리 폐쇄 포맷이라 libredwg(WASM)로 DXF 로 변환한 뒤 기존 DXF 파서에 넘긴다.
+    if (ext === 'dwg') {
+      setParsing('DWG 도면 변환 중…');
+      const lib = await loadDwgLib();
+      const buf = await file.arrayBuffer();
+      setParsing('DWG 엔티티 추출 중…');
+      await new Promise((r) => setTimeout(r, 30));
+      const dxfBytes = lib.dwg_write_dxf(buf);
+      if (!dxfBytes || !dxfBytes.length) throw new Error('DWG를 해석하지 못했습니다 (도면 버전 확인)');
+      setParsing('도면 형상 해석 중…');
+      const text = new TextDecoder('utf-8').decode(dxfBytes);
+      const res = P.parseDxf(text);
+      if (!res.polys.length) throw new Error('DWG에서 그릴 수 있는 선을 찾지 못했습니다 (블록/레이어 확인)');
+      const dwgRegions = P.regionsFromPolys(res.polys);
+      res.stats.regions = dwgRegions.length;
+      res.stats.format = 'DWG';
+      return { patches: res.polys, regions: dwgRegions, stats: res.stats, kind: 'DWG', vector: true };
+    }
+
     // --- DXF ---
     if (ext === 'dxf') {
       setParsing('DXF 엔티티 해석 중…');
@@ -3674,7 +3726,7 @@ function App() {
       return { patches: res.polys, regions: res.regions, stats: res.stats, kind: ext.toUpperCase(), raster: canvas };
     }
 
-    throw new Error('지원하지 않는 형식입니다 — DXF 또는 SVG 도면을 사용해 주세요');
+    throw new Error('지원하지 않는 형식입니다 — DWG, DXF 또는 SVG 도면을 사용해 주세요');
   }, [renderPdfFirstPage]);
 
   /** 파싱 결과를 실제 화면 상태로 반영한다 (모달에서 '적용하기' 를 누른 뒤 호출) */
@@ -3766,11 +3818,11 @@ function App() {
     // 지시서 Task 4-5 — 이미지·PDF 도면은 11/20 범위 밖. 기존 데이터를 건드리지 않고 안내만 한다.
     // 화면 안내문이 DXF·SVG 만 지원한다고 적혀 있으므로 드롭으로 들어온 PDF 도 같이 막는다.
     if (isRasterFile) {
-      window.alert('현재 벡터 형식(SVG/DXF) 도면만 지원합니다.');
+      window.alert('현재 벡터 형식(DWG/DXF/SVG) 도면만 지원합니다.');
       return;
     }
     if (isPdfFile) {
-      window.alert('PDF는 지원하지 않습니다. DXF 또는 SVG 도면을 사용해 주세요.');
+      window.alert('PDF는 지원하지 않습니다. DWG, DXF 또는 SVG 도면을 사용해 주세요.');
       return;
     }
 
@@ -3804,7 +3856,7 @@ function App() {
     } catch (err) {
       const msg = String(err && err.message ? err.message : err);
       setParseError(msg);
-      notify('파일을 인식하지 못했습니다. 벡터 도면(SVG/DXF)을 사용해 주세요');
+      notify('파일을 인식하지 못했습니다. 벡터 도면(DWG/DXF/SVG)을 사용해 주세요');
     } finally {
       setParsing(null);
     }
@@ -4036,7 +4088,7 @@ function App() {
                   ref={fileRef}
                   id="plan-file-input"
                   type="file"
-                  accept=".dxf,.svg"
+                  accept=".dwg,.dxf,.svg"
                   onChange={handlePickPlan}
                   className="peer sr-only"
                   aria-label="도면 파일 선택"
@@ -4046,13 +4098,13 @@ function App() {
                     그 포커스는 peer-focus-visible 로 label 테두리에 보인다. */}
                 <label
                   htmlFor="plan-file-input"
-                  title="지원 형식: DXF / SVG · 최대 40MB"
+                  title="지원 형식: DWG / DXF / SVG · 최대 40MB"
                   className="flex cursor-pointer items-center gap-1.5 rounded-lg border border-slate-300 bg-white px-2.5 py-1.5 text-[11px] font-bold text-slate-700 transition hover:border-slate-400 hover:bg-slate-50 active:scale-95 peer-focus-visible:outline peer-focus-visible:outline-2 peer-focus-visible:outline-offset-2 peer-focus-visible:outline-[#1E3A8A]"
                 >
                   <Icon name="Upload" size={12} />
                   도면 업로드
                 </label>
-                <span className="hidden shrink-0 text-[10px] font-semibold text-slate-400 xl:inline">DXF·SVG / 40MB</span>
+                <span className="hidden shrink-0 text-[10px] font-semibold text-slate-400 xl:inline">DWG·DXF·SVG / 40MB</span>
 
                 <button
                   type="button"
