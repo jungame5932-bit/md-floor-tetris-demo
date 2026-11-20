@@ -198,8 +198,10 @@ window.PlanParser = (function () {
   }
 
   /* 파싱 결과가 그릴 만한지 판정한다. 여기서 막지 않으면 화면이 빈 채로 남는다. */
-  var MAX_POLYS = 20000;
-  var MAX_POINTS = 400000;
+  // DWG 원본은 요소가 수만 개까지 나온다. 5만 개까지 받는다.
+  // 점 상한은 요소당 평균 12점을 기준으로 잡되, 호·스플라인으로 샘플링이 늘어난 경우까지 덮는다.
+  var MAX_POLYS = 50000;
+  var MAX_POINTS = 1200000;
   function validateGeometry(polys, rawBBox) {
     if (!polys || !polys.length) return { ok: false, reason: '도면에서 그릴 수 있는 선을 찾지 못했습니다' };
     if (polys.length > MAX_POLYS) {
@@ -280,17 +282,73 @@ window.PlanParser = (function () {
 
     // 같은 구획을 채움용/테두리용으로 두 번 그린 도면이 흔하다.
     // 바운딩박스가 사실상 같고 면적도 비슷하면 하나만 남긴다.
+    //
+    // 예전에는 남은 후보 전부와 비교했다(O(n^2)). 닫힌 도형이 8,000개면 12.7초,
+    // 5만 개면 사실상 멈춘다. 중복은 바운딩박스가 겹쳐야만 성립하므로
+    // 공간 격자로 이웃 칸만 본다. 결과 집합과 순서는 이전과 같다.
     var out = [];
+    var gridCell = 1;
+    if (raw.length > 1) {
+      var gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+      for (var gi = 0; gi < raw.length; gi++) {
+        var gb = raw[gi].bbox;
+        if (gb.x < gx0) gx0 = gb.x;
+        if (gb.y < gy0) gy0 = gb.y;
+        if (gb.x + gb.w > gx1) gx1 = gb.x + gb.w;
+        if (gb.y + gb.h > gy1) gy1 = gb.y + gb.h;
+      }
+      var gArea = Math.max(1e-6, (gx1 - gx0) * (gy1 - gy0));
+      gridCell = Math.max(1e-6, Math.sqrt(gArea / raw.length));
+    }
+    var buckets = {};
+    var MAX_CELLS = 256;
     for (var r = 0; r < raw.length; r++) {
       var cand = raw[r];
+      var cb = cand.bbox;
+      var cx0 = Math.floor(cb.x / gridCell), cy0 = Math.floor(cb.y / gridCell);
+      var cx1 = Math.floor((cb.x + cb.w) / gridCell), cy1 = Math.floor((cb.y + cb.h) / gridCell);
       var dup = false;
-      for (var o = 0; o < out.length; o++) {
-        var kept = out[o];
-        if (bboxIoU(cand.bbox, kept.bbox) < 0.82) continue;
-        var ratio = cand.area / (kept.area || 1);
-        if (ratio > 0.8 && ratio < 1.25) { dup = true; break; }
+
+      if ((cx1 - cx0 + 1) * (cy1 - cy0 + 1) > MAX_CELLS) {
+        // 격자를 수백 칸 덮는 큰 도형 — 전체와 비교하되 면적 창으로 좁힌다
+        for (var oi = 0; oi < out.length; oi++) {
+          var kp = out[oi];
+          var rt = cand.area / (kp.area || 1);
+          if (!(rt > 0.8 && rt < 1.25)) continue;
+          if (bboxIoU(cb, kp.bbox) < 0.82) continue;
+          dup = true; break;
+        }
+      } else {
+        var seen = {};
+        for (var qx = cx0; qx <= cx1 && !dup; qx++) {
+          for (var qy = cy0; qy <= cy1 && !dup; qy++) {
+            var bk = buckets[qx + ':' + qy];
+            if (!bk) continue;
+            for (var bi = 0; bi < bk.length; bi++) {
+              var ki = bk[bi];
+              if (seen[ki]) continue;
+              seen[ki] = 1;
+              var kept = out[ki];
+              if (bboxIoU(cb, kept.bbox) < 0.82) continue;
+              var ratio = cand.area / (kept.area || 1);
+              if (ratio > 0.8 && ratio < 1.25) { dup = true; break; }
+            }
+          }
+        }
       }
-      if (!dup) out.push(cand);
+      if (dup) continue;
+
+      var newIdx = out.length;
+      out.push(cand);
+      if ((cx1 - cx0 + 1) * (cy1 - cy0 + 1) <= MAX_CELLS) {
+        for (var ix = cx0; ix <= cx1; ix++) {
+          for (var iy = cy0; iy <= cy1; iy++) {
+            var key2 = ix + ':' + iy;
+            if (!buckets[key2]) buckets[key2] = [];
+            buckets[key2].push(newIdx);
+          }
+        }
+      }
     }
     return out;
   }
