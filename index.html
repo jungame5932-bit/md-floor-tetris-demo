@@ -354,6 +354,68 @@ window.PlanParser = (function () {
   }
 
   /** 폴리라인 집합을 target 박스에 맞춰 정규화. flipY 는 DXF(수학좌표) 대응. */
+  /** 퍼센타일 트림만 적용한 콘텐츠 상자 (여백 없음) */
+  function contentBBox(polys) {
+    var xs = [], ys = [];
+    for (var i = 0; i < polys.length; i++) {
+      var pts = polys[i].pts || [];
+      for (var j = 0; j < pts.length; j++) {
+        var x = pts[j][0], y = pts[j][1];
+        if (isFinite(x) && isFinite(y)) { xs.push(x); ys.push(y); }
+      }
+    }
+    var raw = bboxOf(polys);
+    if (xs.length < 200) return raw;
+    xs.sort(function (a, b) { return a - b; });
+    ys.sort(function (a, b) { return a - b; });
+    var pick = function (arr, q) {
+      var k = (arr.length - 1) * q;
+      var f = Math.floor(k), c = Math.ceil(k);
+      return f === c ? arr[f] : arr[f] * (c - k) + arr[c] * (k - f);
+    };
+    var w = pick(xs, 0.995) - pick(xs, 0.005);
+    var h = pick(ys, 0.995) - pick(ys, 0.005);
+    if (!(w > 0) || !(h > 0)) return raw;
+    if (w < raw.w * 0.02 || h < raw.h * 0.02) return raw;
+    return { x: pick(xs, 0.005), y: pick(ys, 0.005), w: w, h: h };
+  }
+
+  /**
+   * 비율 패딩 핏 — 콘텐츠를 뷰어의 (1 - 2*padFrac) 만큼 채우고 중앙에 놓는다.
+   * robustBBox 의 안전 여백(8%)은 바깥에 남겨 두고, 스케일은 콘텐츠 상자로 잡는다.
+   * 그래야 패딩이 두 번 먹어 도면이 작아지는 일이 없다.
+   * 마지막에 안전 상자가 뷰어를 넘지 않도록 스케일을 한 번 더 조인다.
+   */
+  function fitPadded(polys, tw, th, padFrac, flipY) {
+    var safe = robustBBox(polys);
+    var content = contentBBox(polys);
+    if (!(content.w > 0) || !(content.h > 0)) content = safe;
+    var pf = Math.max(0, Math.min(0.3, padFrac == null ? 0.06 : padFrac));
+    var availW = Math.max(1, tw * (1 - pf * 2));
+    var availH = Math.max(1, th * (1 - pf * 2));
+    var s = Math.min(availW / content.w, availH / content.h);
+    if (!isFinite(s) || s <= 0) s = 1;
+    // 안전 상자(이상치 포함)가 뷰어 밖으로 나가면 잘린다 — 스케일을 줄여 막는다
+    var maxS = Math.min((tw - 2) / Math.max(safe.w, 1e-9), (th - 2) / Math.max(safe.h, 1e-9));
+    if (isFinite(maxS) && maxS > 0 && s > maxS) s = maxS;
+    var cxContent = content.x + content.w / 2;
+    var cyContent = content.y + content.h / 2;
+    var out = polys.map(function (p) {
+      return {
+        pts: p.pts.map(function (pt) {
+          return [
+            tw / 2 + (pt[0] - cxContent) * s,
+            flipY ? th / 2 - (pt[1] - cyContent) * s : th / 2 + (pt[1] - cyContent) * s,
+          ];
+        }),
+        closed: p.closed,
+        layer: p.layer,
+        kind: p.kind,
+      };
+    });
+    return { polys: out, scale: s, bbox: safe, content: content };
+  }
+
   function fit(polys, tw, th, pad, flipY) {
     var b = robustBBox(polys);
     var s = Math.min((tw - pad * 2) / b.w, (th - pad * 2) / b.h);
@@ -541,9 +603,37 @@ window.PlanParser = (function () {
     var out = [];
     var counts = {};
 
+    // 도면 안의 글자는 그리지 않는다. 구역 이름·매출·평수는 앱 데이터로만 그린다.
+    // emit() 화이트리스트에 없어서 이미 안 나오지만, 나중에 타입이 추가될 때
+    // 실수로 새지 않도록 여기서 명시적으로 끊고 개수를 센다.
+    var TEXT_TYPES = {
+      TEXT: 1, MTEXT: 1, ATTRIB: 1, ATTDEF: 1,
+      DIMENSION: 1, LEADER: 1, MLEADER: 1, MULTILEADER: 1,
+      TOLERANCE: 1, MLEADERSTYLE: 1,
+    };
+    // 형상이 아닌 것들 — POINT 는 원점 근처 노이즈로 바운딩박스를 망친다
+    var NON_GEOMETRY = { POINT: 1, HATCH: 1, VIEWPORT: 1 };
+    var textSkipped = 0;
+    var nonGeomSkipped = 0;
+
     function addPoly(pts, layer, closed, kind) {
       if (!pts || pts.length < 2) return;
-      out.push({ pts: pts, layer: layer || '0', closed: !!closed, kind: kind });
+      // 좌표에 NaN/Infinity 가 섞이면 SVG 속성이 깨진다 — 유효한 점만 남긴다
+      var safe = [];
+      for (var si = 0; si < pts.length; si++) {
+        var sx2 = pts[si][0], sy2 = pts[si][1];
+        if (typeof sx2 === 'number' && typeof sy2 === 'number' && isFinite(sx2) && isFinite(sy2)) {
+          safe.push([sx2, sy2]);
+        }
+      }
+      if (safe.length < 2) return;
+      // 길이 0 인 조각(한 점에 겹친 선)은 보이지도 않으면서 바운딩박스만 넓힌다 — 버린다
+      var ex0 = safe[0][0], ey0 = safe[0][1], spread = 0;
+      for (var zi = 1; zi < safe.length; zi++) {
+        if (Math.abs(safe[zi][0] - ex0) > 1e-9 || Math.abs(safe[zi][1] - ey0) > 1e-9) { spread = 1; break; }
+      }
+      if (!spread) return;
+      out.push({ pts: safe, layer: layer || '0', closed: !!closed, kind: kind });
       counts[kind] = (counts[kind] || 0) + 1;
     }
 
@@ -649,6 +739,10 @@ window.PlanParser = (function () {
       }
       if (isPaper) { droppedPaper += 1; continue; }
 
+      // 글자·치수선·지시선은 레이아웃이 아니다. 형상 판정 전에 끊는다.
+      if (TEXT_TYPES[ent.type]) { textSkipped += 1; continue; }
+      if (NON_GEOMETRY[ent.type]) { nonGeomSkipped += 1; continue; }
+
       // 구형 POLYLINE 은 좌표가 VERTEX 자식들로 쪼개지고 SEQEND 로 끝난다.
       // DWG→DXF 변환이 이 형식으로 내보내는 경우가 흔해서 여기서 하나로 묶는다.
       if (ent.type === 'POLYLINE') {
@@ -690,7 +784,8 @@ window.PlanParser = (function () {
     var check = validateGeometry(kept, rawBBox);
     if (!check.ok) throw new Error(check.reason);
 
-    var fitted = fit(kept, 1000, 680, 26, true);
+    // 상하좌우 6% 패딩으로 핏 — 뷰어를 88% 가까이 채우고 중앙에 놓는다
+    var fitted = fitPadded(kept, 1000, 680, 0.06, true);
     return {
       polys: fitted.polys,
       stats: {
@@ -702,7 +797,9 @@ window.PlanParser = (function () {
         droppedPaper: droppedPaper,
         layers: Object.keys(layers),
         units: header['$INSUNITS'] || '0',
-        extents: { w: Math.round(fitted.bbox.w), h: Math.round(fitted.bbox.h) },
+        extents: { w: Math.round(fitted.content ? fitted.content.w : fitted.bbox.w), h: Math.round(fitted.content ? fitted.content.h : fitted.bbox.h) },
+        textSkipped: textSkipped,
+        nonGeomSkipped: nonGeomSkipped,
         byType: counts,
       },
     };
@@ -1511,6 +1608,8 @@ window.PlanParser = (function () {
     toPathData: toPathData,
     bboxOf: bboxOf,
     fit: fit,
+    fitPadded: fitPadded,
+    contentBBox: contentBBox,
     rdp: rdp,
   };
 })();
@@ -2905,16 +3004,19 @@ function FloorPlan({
             )
           ) : null}
 
-          {/* 해석된 라인 — 벽체/동선 */}
+          {/* 해석된 라인 — 벽체/동선
+              vectorEffect 로 선 굵기를 화면 픽셀 기준으로 고정한다.
+              확대해도 선이 두꺼워지지 않고, 축소해도 사라지지 않는다. */}
           {traceOn && analysis && analysis.pathD ? (
             <path
               d={analysis.pathD}
               fill="none"
               stroke="#0F172A"
-              strokeWidth="1.1"
+              strokeWidth="1.15"
               strokeLinejoin="round"
               strokeLinecap="round"
-              opacity="0.82"
+              vectorEffect="non-scaling-stroke"
+              opacity="0.88"
               style={{ pointerEvents: 'none' }}
             />
           ) : null}
@@ -2926,6 +3028,7 @@ function FloorPlan({
               fill="rgba(30,58,138,0.05)"
               stroke="#1E3A8A"
               strokeWidth="1.4"
+              vectorEffect="non-scaling-stroke"
               strokeDasharray="6 4"
               strokeLinejoin="round"
               opacity="0.85"
