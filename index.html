@@ -390,6 +390,14 @@ window.PlanParser = (function () {
     var safe = robustBBox(polys);
     var content = contentBBox(polys);
     if (!(content.w > 0) || !(content.h > 0)) content = safe;
+    // 퍼센타일 트림은 이상치를 걷어내는 용도다. 그런데 실제 도면은 테두리·표제란이
+    // 극단부에 있어서 트림이 도면의 10% 넘게 잘라낸다. 그 상태로 스케일을 잡으면
+    // 패딩이 사라지고 도면이 뷰어 끝에 붙는다(백화점 도면 실측 99.7%).
+    // 트림이 조금만 잘랐다면(양 축 모두 55% 이상 남음) 트림을 버리고 전체 상자를 쓴다.
+    var full = bboxOf(polys);
+    if (full.w > 0 && full.h > 0 && content.w >= full.w * 0.55 && content.h >= full.h * 0.55) {
+      content = full;
+    }
     var pf = Math.max(0, Math.min(0.3, padFrac == null ? 0.06 : padFrac));
     var availW = Math.max(1, tw * (1 - pf * 2));
     var availH = Math.max(1, th * (1 - pf * 2));
@@ -398,6 +406,11 @@ window.PlanParser = (function () {
     // 안전 상자(이상치 포함)가 뷰어 밖으로 나가면 잘린다 — 스케일을 줄여 막는다
     var maxS = Math.min((tw - 2) / Math.max(safe.w, 1e-9), (th - 2) / Math.max(safe.h, 1e-9));
     if (isFinite(maxS) && maxS > 0 && s > maxS) s = maxS;
+    // 백분위 트림은 점이 몰린 쪽을 기준으로 잘라서, 실제 도면 끝이 트림 밖에 남을 수 있다.
+    // 그 경우 위 계산만으로는 도면이 뷰어를 넘친다(실측 107.9%). 전체 상자로 한 번 더 조인다.
+    var fullBox = bboxOf(polys);
+    var fullMax = Math.min((tw - 2) / Math.max(fullBox.w, 1e-9), (th - 2) / Math.max(fullBox.h, 1e-9));
+    if (isFinite(fullMax) && fullMax > 0 && s > fullMax) s = fullMax;
     var cxContent = content.x + content.w / 2;
     var cyContent = content.y + content.h / 2;
     var out = polys.map(function (p) {
@@ -414,6 +427,130 @@ window.PlanParser = (function () {
       };
     });
     return { polys: out, scale: s, bbox: safe, content: content };
+  }
+
+  /**
+   * 좌표가 멀리 떨어진 별도 도면(상세도·부품도·범례)을 걷어낸다.
+   * 한 파일에 평면도와 상세도를 같이 넣어 두는 경우가 흔한데, 작은 상세도가
+   * 수십만 단위로 떨어져 있으면 전체 bbox 를 지배해 본도면이 띠처럼 압축된다.
+   * 격자로 연결 요소를 만든 뒤 가장 큰 덩어리에 붙어 있는 것만 남긴다.
+   */
+  function dropRemoteClusters(polys) {
+    var res = { polys: polys, clusters: 0, dropped: 0, droppedPolys: 0 };
+    if (!polys || polys.length < 8) return res;
+
+    var boxes = [];
+    var gx0 = Infinity, gy0 = Infinity, gx1 = -Infinity, gy1 = -Infinity;
+    for (var i = 0; i < polys.length; i++) {
+      var pts = polys[i].pts || [];
+      var x0 = Infinity, y0 = Infinity, x1 = -Infinity, y1 = -Infinity;
+      for (var j = 0; j < pts.length; j++) {
+        var x = pts[j][0], y = pts[j][1];
+        if (!isFinite(x) || !isFinite(y)) continue;
+        if (x < x0) x0 = x; if (x > x1) x1 = x;
+        if (y < y0) y0 = y; if (y > y1) y1 = y;
+      }
+      if (!isFinite(x0)) { x0 = 0; y0 = 0; x1 = 0; y1 = 0; }
+      boxes.push({ x0: x0, y0: y0, x1: x1, y1: y1, n: pts.length });
+      if (x0 < gx0) gx0 = x0; if (x1 > gx1) gx1 = x1;
+      if (y0 < gy0) gy0 = y0; if (y1 > gy1) gy1 = y1;
+    }
+    var span = Math.max(gx1 - gx0, gy1 - gy0);
+    if (!(span > 0)) return res;
+    var cell = span / 200;
+    if (!(cell > 0)) return res;
+
+    // 같은 칸을 공유하는 폴리라인을 하나로 묶는다 (union-find)
+    var parent = new Array(polys.length);
+    for (var p0 = 0; p0 < polys.length; p0++) parent[p0] = p0;
+    var find = function (a) {
+      while (parent[a] !== a) { parent[a] = parent[parent[a]]; a = parent[a]; }
+      return a;
+    };
+    var union = function (a, b) {
+      var ra = find(a), rb = find(b);
+      if (ra !== rb) parent[ra] = rb;
+    };
+    var grid = {};
+    for (var b2 = 0; b2 < boxes.length; b2++) {
+      var bb = boxes[b2];
+      var cx0 = Math.floor(bb.x0 / cell), cx1 = Math.floor(bb.x1 / cell);
+      var cy0 = Math.floor(bb.y0 / cell), cy1 = Math.floor(bb.y1 / cell);
+      for (var qx = cx0; qx <= cx1; qx++) {
+        for (var qy = cy0; qy <= cy1; qy++) {
+          var gkey = qx + ':' + qy;
+          if (grid[gkey] === undefined) grid[gkey] = b2;
+          else union(grid[gkey], b2);
+        }
+      }
+    }
+
+    var groups = {};
+    for (var g = 0; g < polys.length; g++) {
+      var r = find(g);
+      if (!groups[r]) groups[r] = { idx: [], pts: 0, x0: Infinity, y0: Infinity, x1: -Infinity, y1: -Infinity };
+      var gr = groups[r];
+      gr.idx.push(g);
+      gr.pts += boxes[g].n;
+      if (boxes[g].x0 < gr.x0) gr.x0 = boxes[g].x0;
+      if (boxes[g].y0 < gr.y0) gr.y0 = boxes[g].y0;
+      if (boxes[g].x1 > gr.x1) gr.x1 = boxes[g].x1;
+      if (boxes[g].y1 > gr.y1) gr.y1 = boxes[g].y1;
+    }
+    var list = [];
+    for (var k in groups) if (groups.hasOwnProperty(k)) list.push(groups[k]);
+    res.clusters = list.length;
+    if (list.length < 2) return res;
+
+    // 가장 큰 덩어리를 기준으로 잡고, 거기서 너무 멀리 떨어진 덩어리는 버린다
+    var anchorC = list[0];
+    for (var a2 = 1; a2 < list.length; a2++) if (list[a2].pts > anchorC.pts) anchorC = list[a2];
+    var adiag = Math.hypot(anchorC.x1 - anchorC.x0, anchorC.y1 - anchorC.y0);
+    var reach = Math.max(adiag * 1.2, span * 0.05);
+    var keepIdx = {};
+    var droppedCount = 0, droppedPolys = 0;
+    // 살릴 덩어리 후보: 기준 덩어리이거나, 기준에서 너무 멀지 않은 것
+    var keepList = [];
+    for (var l = 0; l < list.length; l++) {
+      var c = list[l];
+      var gdx = Math.max(0, Math.max(anchorC.x0 - c.x1, c.x0 - anchorC.x1));
+      var gdy = Math.max(0, Math.max(anchorC.y0 - c.y1, c.y0 - anchorC.y1));
+      var gapDist = Math.hypot(gdx, gdy);
+      if (c === anchorC || gapDist <= reach) keepList.push(c);
+      else { droppedCount += 1; droppedPolys += c.idx.length; }
+    }
+
+    // 한 파일에 바닥 평면과 천장 평면을 나란히 넣어 두는 경우가 있다
+    // (백화점 도면.dwg: FLOOR PLAN-ALT4 + CELING PLAN). 둘 다 그리면 뷰어가
+    // 두 장을 다 담느라 절반으로 줄어든다. 한쪽이 확실히 우세하면 그것만 쓴다.
+    if (keepList.length > 1) {
+      var weight = function (cl) { return cl.pts; };
+      var best = keepList[0];
+      for (var w2 = 1; w2 < keepList.length; w2++) if (weight(keepList[w2]) > weight(best)) best = keepList[w2];
+      var second = 0;
+      for (var w3 = 0; w3 < keepList.length; w3++) if (keepList[w3] !== best && weight(keepList[w3]) > second) second = weight(keepList[w3]);
+      // 2등이 1등의 75% 이상이면 진짜로 나뉜 도면일 수 있으니 둘 다 남긴다
+      if (second < weight(best) * 0.75) {
+        for (var w4 = 0; w4 < keepList.length; w4++) {
+          if (keepList[w4] === best) continue;
+          droppedCount += 1;
+          droppedPolys += keepList[w4].idx.length;
+        }
+        keepList = [best];
+      }
+    }
+    for (var m2 = 0; m2 < keepList.length; m2++) {
+      for (var m = 0; m < keepList[m2].idx.length; m++) keepIdx[keepList[m2].idx[m]] = 1;
+    }
+    if (!droppedCount) return res;
+
+    var outKept = [];
+    for (var o2 = 0; o2 < polys.length; o2++) if (keepIdx[o2]) outKept.push(polys[o2]);
+    if (!outKept.length) return res;
+    res.polys = outKept;
+    res.dropped = droppedCount;
+    res.droppedPolys = droppedPolys;
+    return res;
   }
 
   function fit(polys, tw, th, pad, flipY) {
@@ -781,6 +918,11 @@ window.PlanParser = (function () {
     }
     if (!kept.length) kept = out;
 
+    // 한 파일에 멀리 떨어진 상세도·부품도가 같이 들어 있으면 그게 스케일을 지배한다.
+    // 실제 도면(백화점 도면.dwg)에서 본도면이 가로 15% 띠로 압축되던 원인이다.
+    var remote = dropRemoteClusters(kept);
+    if (remote.dropped) kept = remote.polys;
+
     var check = validateGeometry(kept, rawBBox);
     if (!check.ok) throw new Error(check.reason);
 
@@ -800,6 +942,9 @@ window.PlanParser = (function () {
         extents: { w: Math.round(fitted.content ? fitted.content.w : fitted.bbox.w), h: Math.round(fitted.content ? fitted.content.h : fitted.bbox.h) },
         textSkipped: textSkipped,
         nonGeomSkipped: nonGeomSkipped,
+        clusters: remote.clusters,
+        droppedClusters: remote.dropped,
+        droppedByCluster: remote.droppedPolys,
         byType: counts,
       },
     };
@@ -1609,6 +1754,7 @@ window.PlanParser = (function () {
     bboxOf: bboxOf,
     fit: fit,
     fitPadded: fitPadded,
+    dropRemoteClusters: dropRemoteClusters,
     contentBBox: contentBBox,
     rdp: rdp,
   };
