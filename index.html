@@ -132,6 +132,8 @@
   .zone-group:focus .zone-shape { stroke: #1E3A8A; stroke-width: 3; }
   .zone-group:focus-visible { outline: none !important; }
   .zone-group:focus-visible .zone-shape { stroke: #1E3A8A; stroke-width: 3; }
+  /* 라벨은 도면 선 위에서도 또렷하게 — 기하 정밀 렌더링 + 흰 외곽선은 인라인 속성으로 준다 */
+  .zone-label text { text-rendering: geometricPrecision; }
 </style>
 </head>
 <body class="flex h-screen flex-col bg-[#FAF9F7] text-slate-800 antialiased">
@@ -2772,7 +2774,7 @@ function KpiCapsule({ label, value, unit, delta, deltaUnit, digits, footnote }) 
 
 function ZoneShape({
   zone, row, hovered, selected, dropActive, dragKind, dragging, pulsing,
-  pointerDragEnabled, tabIndex,
+  pointerDragEnabled, tabIndex, pxPerUnit, isBuiltIn,
   onHover, onLeave, onActivate,
   onApplyBrand, onSwap, onDragStartZone, onDragEndZone,
   onPointerDragStart, onVertexDrag, ghost, bgHidden, zonesOnly,
@@ -2821,38 +2823,106 @@ function ZoneShape({
       : (ghost ? (bgHidden ? 0.9 : 0.62) : 1);
 
   const { x: cx, y: cy } = zone.center;
-  // 지시서 Task 2 — 4행(브랜드명 · 매출/신장율 · 평효율 · 평수)을 모든 구역에서 상시 노출한다.
-  // 예전에는 미선택 소구역이 2행으로 접혀 Z-04 의 평효율 줄이 아예 사라졌다.
-  // 행 삭제·말줄임은 금지 — 좁은 칸은 글자 폭을 압축하고, 20평 미만은 그룹을 0.75 로 줄인다.
-  // 화면 기준 가독 구간 10~14px 을 지킨다 (지시서 Item 4).
-  // 좁은 칸은 12px 로 낮추고, 그래도 넘치면 그룹을 축소한다.
-  const fsName = Math.max(10, Math.min(14, compact ? 12 : small ? 12.5 : 13.5));
-  const fsSub = Math.max(10, Math.min(12, fsName * 0.92));
+
+  // ── 구역 실제 크기(도면 단위) ──
+  // 폴리곤 꼭짓점이 있으면 그 bbox 를 쓰고, 없으면 라벨 폭에서 역산한다.
+  // NaN·Infinity·0 은 전부 걸러 라벨을 숨긴다 (콘솔 에러 차단).
+  let bw = 0;
+  let bh = 0;
+  if (Array.isArray(zone.pts) && zone.pts.length >= 2) {
+    let x0 = Infinity; let y0 = Infinity; let x1 = -Infinity; let y1v = -Infinity;
+    for (let i = 0; i < zone.pts.length; i += 1) {
+      const px = zone.pts[i][0];
+      const py = zone.pts[i][1];
+      if (!Number.isFinite(px) || !Number.isFinite(py)) continue;
+      if (px < x0) x0 = px;
+      if (py < y0) y0 = py;
+      if (px > x1) x1 = px;
+      if (py > y1v) y1v = py;
+    }
+    if (Number.isFinite(x0) && Number.isFinite(x1)) { bw = x1 - x0; bh = y1v - y0; }
+  }
+  if (!(bw > 0) && typeof zone.labelWidth === 'number' && zone.labelWidth > 0) {
+    bw = zone.labelWidth / 0.94;
+    bh = typeof zone.labelHeight === 'number' && zone.labelHeight > 0 ? zone.labelHeight / 0.92 : bw * 0.5;
+  }
+  const geomOk = Number.isFinite(bw) && Number.isFinite(bh) && bw > 0 && bh > 0;
+  const ppu = Number.isFinite(pxPerUnit) && pxPerUnit > 0 ? pxPerUnit : 1;
+  const screenW = geomOk ? bw * ppu : 0;
+  const screenH = geomOk ? bh * ppu : 0;
+
+  // ── LOD 3단계 ──
+  // 0: 숨김(툴팁만) / 1: 브랜드명 1행 / 2: 4행 전체
+  // 기본 내장 도면은 B18 요구대로 항상 4행을 유지한다.
+  let lodLevel = 2;
+  if (!isBuiltIn) {
+    if (!geomOk || !(screenW > 0) || !(screenH > 0)) lodLevel = 0;
+    else if (screenW < 60 || screenH < 24) lodLevel = 0;
+    else if (screenW < 120 || screenH < 56) lodLevel = 1;
+    else lodLevel = 2;
+  }
+
+  // ── 폰트는 화면 기준 고정 px 로 정의한다 ──
+  // 내장 도면은 기존 크기 체계를 그대로 쓴다 (회귀 보호).
+  const fsName = isBuiltIn
+    ? Math.max(10, Math.min(14, compact ? 12 : small ? 12.5 : 13.5))
+    : 12;
+  const fsSub = isBuiltIn ? Math.max(10, Math.min(12, fsName * 0.92)) : 10.5;
+  const fsTiny = isBuiltIn ? fsSub : 10;
   const lh = fsName * 1.42;
-  // 20평 미만 소구역은 4행을 유지하려고 그룹을 축소하되,
-  // 축소 후에도 10px 아래로 내려가지 않게 하한을 건다 (9px 는 판독 불가).
+
+  // 20평 미만 소구역은 4행을 유지하려고 그룹을 축소한다 (내장 도면 전용).
   const areaSmall = typeof zone.area === 'number' && zone.area > 0 && zone.area < 20;
-  const labelScale = areaSmall ? Math.max(10 / fsName, 0.75) : 1;
+  const builtinScale = isBuiltIn && areaSmall ? Math.max(10 / fsName, 0.75) : 1;
   const blockH = lh * 3 + fsName * 1.25;
   const lineTop = cy - blockH / 2 + fsName * 0.98;
   const y1 = lineTop;
   const y2 = lineTop + lh;
   const y3 = lineTop + lh * 2;
   const y4 = lineTop + lh * 3;
-  // 배지(NEW·개편요망)는 폭 34~54px 라 좁은 칸에서는 밖으로 나간다.
-  const showBadge = !(typeof zone.labelWidth === 'number') || zone.labelWidth >= 58;
-  // 텍스트 그룹을 중심 기준으로 축소한다 (transform-origin: center 등가)
-  const labelTransform = labelScale === 1
+
+  // ── 역스케일: 확대해도 글자는 화면에서 9~14px 로 고정 ──
+  // 내장 도면은 기존 동작 그대로 (균등 축소만).
+  let invScale = builtinScale;
+  if (!isBuiltIn && lodLevel > 0) {
+    const targetScreenScale = Math.min(1.15, Math.max(0.8, screenW / 150));
+    let s = targetScreenScale / ppu;
+    // 세로로도 구역을 넘지 않게 조인다
+    const maxByH = ((screenH - 4) / ppu) / Math.max(1e-6, blockH);
+    s = Math.min(s, maxByH);
+    // 실효 9px 아래로는 내려가지 않게 하한 (판독 불가 방지)
+    const minByPx = 9 / (fsSub * ppu);
+    s = Math.max(s, minByPx);
+    invScale = Number.isFinite(s) && s > 0 ? s : 1;
+  }
+  const labelTransform = Math.abs(invScale - 1) < 1e-4
     ? undefined
-    : `translate(${cx} ${cy}) scale(${labelScale}) translate(${-cx} ${-cy})`;
+    : `translate(${cx} ${cy}) scale(${invScale}) translate(${-cx} ${-cy})`;
+
+  // 배지(NEW·개편요망)는 폭 34~54px 라 좁은 칸에서는 밖으로 나간다.
+  const showBadge = lodLevel === 2 && (!(typeof zone.labelWidth === 'number') || zone.labelWidth >= 58);
 
   // 한글은 전각(1.0em), 영문·숫자는 0.56em 로 잡아 실제 폭을 계산한다.
   const charEm = (ch) => (/[\uac00-\ud7a3\u3131-\u318e]/.test(ch) ? 1.0 : ch === ' ' ? 0.32 : 0.56);
   const textEm = (s) => Array.from(s).reduce((acc, ch) => acc + charEm(ch), 0);
-  const boxW = Math.max(0, typeof zone.labelWidth === 'number' ? zone.labelWidth : 200);
-  // 말줄임 대신 textLength 로 압축한다. scale 이 걸린 칸은 그만큼 폭 여유가 생긴다.
-  const fitW = Math.max(6, (boxW - 4) / labelScale);
-  const fitTextLength = (str, fs) => (textEm(str) * fs > fitW ? fitW : undefined);
+
+  // 가로 말줄임 — textLength 로 찌그러뜨리지 않고 글자 수로 자른다.
+  // 렌더 폭 = em * fs * invScale * ppu 이므로 그 역수로 허용 em 을 구한다.
+  const fitStr = (str, fs2) => {
+    if (isBuiltIn || lodLevel === 0) return str;
+    const availEm = Math.max(1, (screenW - 8) / Math.max(1e-6, fs2 * invScale * ppu));
+    if (textEm(str) <= availEm) return str;
+    let acc = 0;
+    let out = '';
+    const chars = Array.from(str);
+    for (let i = 0; i < chars.length; i += 1) {
+      const e2 = charEm(chars[i]);
+      if (acc + e2 + 0.7 > availEm) { out += '…'; break; }
+      acc += e2;
+      out += chars[i];
+    }
+    return out || '…';
+  };
 
   const finalName = row.name;
   const subText = `월 ${moneyShort(row.salesCurr)} / ${growthText(row.growthRate)}`;
@@ -3012,76 +3082,77 @@ function ZoneShape({
       {/* 4행 라벨 — 말줄임·행 삭제 없이 항상 그린다.
           20평 미만 칸은 그룹 전체를 0.75 로 축소한다 (지시서 Task 2 / B18).
           흰 테두리(paint-order: stroke)를 깔아 이웃 구역 경계선 위에서도 읽힌다. */}
-      <g transform={labelTransform}>
-        <text
-          x={cx}
-          y={y1}
-          textAnchor="middle"
-          fill="#0F172A"
-          fontSize={fsName}
-          fontWeight="900"
-          fontFamily="Pretendard, sans-serif"
-          stroke="#FFFFFF"
-          strokeWidth={3}
-          paintOrder="stroke"
-          textLength={fitTextLength(finalName, fsName)}
-          lengthAdjust="spacingAndGlyphs"
-        >
-          {finalName}
-        </text>
+      {/* LOD 0 은 라벨을 아예 그리지 않는다 — 정보는 위 <title> 툴팁이 담당한다. */}
+      {lodLevel > 0 ? (
+        <g className="zone-label" transform={labelTransform}>
+          <text
+            x={cx}
+            y={lodLevel >= 2 ? y1 : cy}
+            textAnchor="middle"
+            fill="#0F172A"
+            fontSize={fsName}
+            fontWeight="900"
+            fontFamily="Pretendard, sans-serif"
+            stroke="#FFFFFF"
+            strokeWidth={3}
+            paintOrder="stroke"
+          >
+            {fitStr(finalName, fsName)}
+          </text>
 
-        <text
-          x={cx}
-          y={y2}
-          textAnchor="middle"
-          fontSize={fsSub}
-          fontWeight="800"
-          fontFamily="Pretendard, sans-serif"
-          stroke="#FFFFFF"
-          strokeWidth={2.5}
-          paintOrder="stroke"
-          textLength={fitTextLength(subText, fsSub)}
-          lengthAdjust="spacingAndGlyphs"
-        >
-          <tspan fill="#334155">{`월 ${moneyShort(row.salesCurr)}`}</tspan>
-          <tspan fill="#94A3B8" fontWeight="600">{' / '}</tspan>
-          <tspan fill={gColor}>{growthText(growth)}</tspan>
-        </text>
+          {lodLevel >= 2 ? (
+            <text
+              x={cx}
+              y={y2}
+              textAnchor="middle"
+              fontSize={fsSub}
+              fontWeight="800"
+              fontFamily="Pretendard, sans-serif"
+              stroke="#FFFFFF"
+              strokeWidth={2.5}
+              paintOrder="stroke"
+            >
+              <tspan fill="#334155">{fitStr(`월 ${moneyShort(row.salesCurr)}`, fsSub)}</tspan>
+              <tspan fill="#94A3B8" fontWeight="600">{' / '}</tspan>
+              <tspan fill={gColor}>{growthText(growth)}</tspan>
+            </text>
+          ) : null}
 
-        <text
-          x={cx}
-          y={y3}
-          textAnchor="middle"
-          fill="#475569"
-          fontSize={fsSub}
-          fontWeight="700"
-          fontFamily="Pretendard, sans-serif"
-          stroke="#FFFFFF"
-          strokeWidth={2.5}
-          paintOrder="stroke"
-          textLength={fitTextLength(effText, fsSub)}
-          lengthAdjust="spacingAndGlyphs"
-        >
-          {effText}
-        </text>
+          {lodLevel >= 2 ? (
+            <text
+              x={cx}
+              y={y3}
+              textAnchor="middle"
+              fill="#475569"
+              fontSize={fsTiny}
+              fontWeight="700"
+              fontFamily="Pretendard, sans-serif"
+              stroke="#FFFFFF"
+              strokeWidth={2.5}
+              paintOrder="stroke"
+            >
+              {fitStr(effText, fsTiny)}
+            </text>
+          ) : null}
 
-        <text
-          x={cx}
-          y={y4}
-          textAnchor="middle"
-          fontSize={fsSub}
-          fontWeight="700"
-          fontFamily="Pretendard, sans-serif"
-          stroke="#FFFFFF"
-          strokeWidth={2.5}
-          paintOrder="stroke"
-          textLength={fitTextLength(pyeongText, fsSub)}
-          lengthAdjust="spacingAndGlyphs"
-        >
-          <tspan fill="#0F172A">{`${row.pyeong}평`}</tspan>
-          <tspan fill="#94A3B8" fontWeight="600">{` · ${zone.id}`}</tspan>
-        </text>
-      </g>
+          {lodLevel >= 2 ? (
+            <text
+              x={cx}
+              y={y4}
+              textAnchor="middle"
+              fontSize={fsTiny}
+              fontWeight="700"
+              fontFamily="Pretendard, sans-serif"
+              stroke="#FFFFFF"
+              strokeWidth={2.5}
+              paintOrder="stroke"
+            >
+              <tspan fill="#0F172A">{`${row.pyeong}평`}</tspan>
+              <tspan fill="#94A3B8" fontWeight="600">{` · ${zone.id}`}</tspan>
+            </text>
+          ) : null}
+        </g>
+      ) : null}
     </g>
   );
 }
@@ -3219,6 +3290,51 @@ function FloorPlan({
     return () => svg.removeEventListener('mousedown', onDown);
   }, [setView]);
 
+  /* ---------------- 줌 연동 LOD ----------------
+   * 화면 1px 이 도면 좌표 몇 단위인지(pxPerUnit)를 재서 구역 라벨 단계를 정한다.
+   * DOM 은 건드리지 않고 상태값만 갱신하므로, 100~200구역에서도 프레임이 밀리지 않는다.
+   * 측정·갱신은 requestAnimationFrame 으로 묶어 한 프레임에 한 번만 돈다. */
+  const [pxPerUnit, setPxPerUnit] = useState(1);
+  const rafRef = useRef(0);
+
+  const measurePpu = useCallback(() => {
+    const svg = svgRef.current;
+    if (!svg) return;
+    let ppu = 1;
+    try {
+      const ctm = svg.getScreenCTM();
+      const v = ctm ? Math.hypot(ctm.a, ctm.b) : 0;
+      if (Number.isFinite(v) && v > 0) ppu = v;
+    } catch (e) { ppu = 1; }
+    setPxPerUnit((prev) => (Math.abs(prev - ppu) < 0.0005 ? prev : ppu));
+  }, []);
+
+  const scheduleMeasure = useCallback(() => {
+    if (rafRef.current) return;
+    rafRef.current = window.requestAnimationFrame(() => {
+      rafRef.current = 0;
+      measurePpu();
+    });
+  }, [measurePpu]);
+
+  // 줌·팬·도면 교체·리사이즈 때마다 다시 잰다
+  useEffect(() => {
+    scheduleMeasure();
+  }, [zoom, pan.x, pan.y, plan, scheduleMeasure]);
+
+  useEffect(() => {
+    const onResize = () => scheduleMeasure();
+    window.addEventListener('resize', onResize);
+    const svg = svgRef.current;
+    const ro = typeof ResizeObserver !== 'undefined' && svg ? new ResizeObserver(() => scheduleMeasure()) : null;
+    if (ro && svg) ro.observe(svg);
+    return () => {
+      window.removeEventListener('resize', onResize);
+      if (ro) ro.disconnect();
+      if (rafRef.current) { window.cancelAnimationFrame(rafRef.current); rafRef.current = 0; }
+    };
+  }, [scheduleMeasure]);
+
   const viewW = baseW / zoom;
   const viewH = baseH / zoom;
   const round2 = (v) => (Math.abs(v) < 0.005 ? 0 : Math.round(v * 100) / 100);
@@ -3353,6 +3469,8 @@ function FloorPlan({
               ghost={uploaded}
               bgHidden={bgHidden}
               zonesOnly={onlyZones}
+              pxPerUnit={pxPerUnit}
+              isBuiltIn={!uploaded}
             />
           ))}
         </g>
