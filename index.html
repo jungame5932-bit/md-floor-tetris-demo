@@ -129,11 +129,21 @@
   /* 코드로 focus() 를 옮긴 경우에도 링이 보이게 한다 — 지시서: 매 정지점에서 포커스 링 표시 */
   .cand-card:focus { outline: 2px solid #1E3A8A !important; outline-offset: 2px; }
   .zone-group:focus { outline: none !important; }
-  .zone-group:focus .zone-shape { stroke: #1E3A8A; stroke-width: 3; }
+  .zone-group:focus .zone-shape { stroke: #1E3A8A; stroke-width: 2.5px; }
   .zone-group:focus-visible { outline: none !important; }
-  .zone-group:focus-visible .zone-shape { stroke: #1E3A8A; stroke-width: 3; }
+  .zone-group:focus-visible .zone-shape { stroke: #1E3A8A; stroke-width: 2.5px; }
   /* 라벨은 도면 선 위에서도 또렷하게 — 기하 정밀 렌더링 + 흰 외곽선은 인라인 속성으로 준다 */
   .zone-label text { text-rendering: geometricPrecision; }
+  /* 확대해도 선 굵기를 화면 픽셀 기준으로 고정한다.
+     복도 띠(.band)는 선이 아니라 면을 흉내낸 요소라 제외한다 —
+     여기에 걸면 복도 폭이 52px 로 굳어 도면이 깨진다. */
+  .plan-svg path,
+  .plan-svg polygon,
+  .plan-svg polyline,
+  .plan-svg rect,
+  .plan-svg circle,
+  .plan-svg line { vector-effect: non-scaling-stroke; }
+  .plan-svg .band { vector-effect: none; }
 </style>
 </head>
 <body class="flex h-screen flex-col bg-[#FAF9F7] text-slate-800 antialiased">
@@ -2812,9 +2822,11 @@ function ZoneShape({
   // '구역만 표시'는 외곽선을 읽는 모드다 — 채우면 덩어리로 보여 경계가 사라진다.
   // 그래서 이 모드에서만 채움을 거의 없애고 테두리를 올린다.
   const onlyOutline = Boolean(zonesOnly);
+  // 화면 픽셀 기준 고정 굵기 (non-scaling-stroke 와 함께 쓴다).
+  // 기본 1.5 / 호버 2 / 선택·드롭 2.5 — 확대해도 막대처럼 뭉치지 않는다.
   const strokeWidth = onlyOutline
-    ? (dropMode ? 3.6 : hovered ? 3 : 2)
-    : (dropMode ? 3.4 : replaced ? 3 : hovered ? 2.6 : zone.auto ? 1.6 : 1.5);
+    ? (dropMode ? 2.5 : hovered ? 2 : 1.5)
+    : (dropMode ? 2.5 : replaced ? 2.5 : hovered ? 2 : 1.5);
   // 배경 도면을 끈 상태에서는 폴리콘을 진하게 채워 텍스트 대비를 확보한다 (지시서 4번)
   const fillOpacity = onlyOutline
     ? 0.05
@@ -3009,7 +3021,7 @@ function ZoneShape({
       />
 
       {selected ? (
-        <path d={zone.path} fill="none" stroke="#1E3A8A" strokeWidth="2.4" strokeOpacity="0.9" strokeLinejoin="round" />
+        <path d={zone.path} fill="none" stroke="#1E3A8A" strokeWidth="2.5" strokeOpacity="0.9" strokeLinejoin="round" vectorEffect="non-scaling-stroke" />
       ) : null}
 
       {selected && zone.auto && Array.isArray(zone.pts) && zone.pts.length >= 3 ? (
@@ -3185,7 +3197,7 @@ function FloorPlan({
   const baseVB = uploaded
     ? { x: 0, y: 0, w: VIEWBOX.w, h: VIEWBOX.h }
     : { x: PLAN_TIGHT_VIEW.x, y: PLAN_TIGHT_VIEW.y, w: PLAN_TIGHT_VIEW.w, h: PLAN_TIGHT_VIEW.h };
-  const MAX_ZOOM = 8;
+  const MAX_ZOOM = 10;   // 1000% — 지시서: 800% 에서 상향
   const [zoom, setZoom] = useState(1);
   const [pan, setPan] = useState({ x: 0, y: 0 });
   const [panning, setPanning] = useState(false);
@@ -3343,7 +3355,7 @@ function FloorPlan({
 
   return (
     <>
-    <svg ref={svgRef} viewBox={viewBoxStr} className={`h-full w-full${bgHidden ? ' focus-mode' : ''}${onlyZones ? ' zones-only' : ''}`} preserveAspectRatio="xMidYMid meet"
+    <svg ref={svgRef} viewBox={viewBoxStr} className={`plan-svg h-full w-full${bgHidden ? ' focus-mode' : ''}${onlyZones ? ' zones-only' : ''}`} preserveAspectRatio="xMidYMid meet"
       style={{ cursor: panning ? 'grabbing' : (zoom > 1 ? 'grab' : 'default') }}
       role="img" aria-label="잠실점 지하 1층 식품관 평면도">
       <defs>
@@ -3393,7 +3405,7 @@ function FloorPlan({
               d={analysis.pathD}
               fill="none"
               stroke="#0F172A"
-              strokeWidth="1.15"
+              strokeWidth="1"
               strokeLinejoin="round"
               strokeLinecap="round"
               vectorEffect="non-scaling-stroke"
@@ -3408,7 +3420,7 @@ function FloorPlan({
               d={analysis.regionD}
               fill="rgba(30,58,138,0.05)"
               stroke="#1E3A8A"
-              strokeWidth="1.4"
+              strokeWidth="1"
               vectorEffect="non-scaling-stroke"
               strokeDasharray="6 4"
               strokeLinejoin="round"
@@ -3424,9 +3436,10 @@ function FloorPlan({
           <path d={OUTER_PATH} fill="none" stroke="#E2E8F0" strokeWidth="6" opacity="0.6" />
 
           {/* 주 동선 (곡선 복도) */}
-          <path d={CORRIDOR} fill="none" stroke="#FFFFFF" strokeWidth="52" strokeLinecap="round" />
-          <path d={CORRIDOR} fill="none" stroke="#E2E8F0" strokeWidth="52" strokeLinecap="round" opacity="0.55" />
-          <path d={CORRIDOR} fill="none" stroke="#FFFFFF" strokeWidth="46" strokeLinecap="round" />
+          {/* 복도는 '띠'다 — 선 굵기 고정 대상이 아니므로 .band 로 제외한다 */}
+          <path className="band" d={CORRIDOR} fill="none" stroke="#FFFFFF" strokeWidth="52" strokeLinecap="round" />
+          <path className="band" d={CORRIDOR} fill="none" stroke="#E2E8F0" strokeWidth="52" strokeLinecap="round" opacity="0.55" />
+          <path className="band" d={CORRIDOR} fill="none" stroke="#FFFFFF" strokeWidth="46" strokeLinecap="round" />
           <path d={CORRIDOR} fill="none" stroke="#CBD5E1" strokeWidth="1.6" strokeDasharray="7 7" opacity="0.9" />
 
           {/* 중앙 에스컬레이터 코어 */}
