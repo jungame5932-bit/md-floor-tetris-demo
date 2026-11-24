@@ -3108,8 +3108,127 @@ function FloorPlan({
   // 배경을 끈 상태에서는 원본이 사라지므로 폴리곤 채움을 진하게 올린다 (지시서 4번)
   const bgHidden = !showBg || onlyZones;
 
+  /* ---------------- 확대 · 축소 (휠 / 드래그 팬 / 버튼) ----------------
+   * 도면 요소의 좌표는 건드리지 않고 viewBox 창만 좁힌다.
+   * 그래서 구역 폴리곤·판정·계산 로직에는 영향이 없다. */
+  const baseVB = uploaded
+    ? { x: 0, y: 0, w: VIEWBOX.w, h: VIEWBOX.h }
+    : { x: PLAN_TIGHT_VIEW.x, y: PLAN_TIGHT_VIEW.y, w: PLAN_TIGHT_VIEW.w, h: PLAN_TIGHT_VIEW.h };
+  const MAX_ZOOM = 8;
+  const [zoom, setZoom] = useState(1);
+  const [pan, setPan] = useState({ x: 0, y: 0 });
+  const [panning, setPanning] = useState(false);
+  const svgRef = useRef(null);
+  const zoomRef = useRef(1);
+  const panRef = useRef({ x: 0, y: 0 });
+  const baseW = baseVB.w;
+  const baseH = baseVB.h;
+  const baseCx = baseVB.x + baseW / 2;
+  const baseCy = baseVB.y + baseH / 2;
+
+  // 확대해도 창이 도면 밖으로 새지 않게 중심을 가둔다
+  const setView = useCallback((z2, px, py) => {
+    const zz = Math.max(1, Math.min(MAX_ZOOM, z2));
+    const limX = Math.max(0, (baseW - baseW / zz) / 2);
+    const limY = Math.max(0, (baseH - baseH / zz) / 2);
+    const nx = Math.max(-limX, Math.min(limX, px));
+    const ny = Math.max(-limY, Math.min(limY, py));
+    zoomRef.current = zz;
+    panRef.current = { x: nx, y: ny };
+    setZoom(zz);
+    setPan({ x: nx, y: ny });
+  }, [baseW, baseH]);
+
+  // 화면의 한 점을 고정한 채 배율만 바꾼다 (휠 커서 위치가 그대로 남는다)
+  const zoomAt = useCallback((z2, clientX, clientY) => {
+    const z1 = zoomRef.current;
+    const nz = Math.max(1, Math.min(MAX_ZOOM, z2));
+    if (Math.abs(nz - z1) < 1e-6) return;
+    const svg = svgRef.current;
+    const ctm = svg ? svg.getScreenCTM() : null;
+    if (!svg || !ctm) { setView(nz, panRef.current.x, panRef.current.y); return; }
+    const pt = svg.createSVGPoint();
+    pt.x = clientX;
+    pt.y = clientY;
+    const q = pt.matrixTransform(ctm.inverse());
+    const vw1 = baseW / z1;
+    const vh1 = baseH / z1;
+    const zx = baseCx + panRef.current.x - vw1 / 2;
+    const zy = baseCy + panRef.current.y - vh1 / 2;
+    const fx = (q.x - zx) / vw1;
+    const fy = (q.y - zy) / vh1;
+    const vw2 = baseW / nz;
+    const vh2 = baseH / nz;
+    setView(nz, q.x - fx * vw2 + vw2 / 2 - baseCx, q.y - fy * vh2 + vh2 / 2 - baseCy);
+  }, [baseW, baseH, baseCx, baseCy, setView]);
+
+  // 버튼은 뷰어 한가운데를 기준으로 확대·축소한다
+  const zoomCenter = useCallback((factor) => {
+    const svg = svgRef.current;
+    const r = svg ? svg.getBoundingClientRect() : null;
+    if (r && r.width > 0) zoomAt(zoomRef.current * factor, r.left + r.width / 2, r.top + r.height / 2);
+    else zoomAt(zoomRef.current * factor, 0, 0);
+  }, [zoomAt]);
+
+  const resetView = useCallback(() => { setView(1, 0, 0); }, [setView]);
+
+  // 새 도면을 올리면 배율·위치를 되돌린다
+  useEffect(() => { resetView(); }, [plan, resetView]);
+
+  // 휠 — React 의 onWheel 은 passive 로 붙어 preventDefault 가 먹지 않는다
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    const onWheel = (ev) => {
+      ev.preventDefault();
+      zoomAt(zoomRef.current * Math.exp(-ev.deltaY * 0.0018), ev.clientX, ev.clientY);
+    };
+    svg.addEventListener('wheel', onWheel, { passive: false });
+    return () => svg.removeEventListener('wheel', onWheel);
+  }, [zoomAt]);
+
+  // 배경 드래그 이동 — 구역 위에서 시작하면 구역 드래그가 이긴다
+  useEffect(() => {
+    const svg = svgRef.current;
+    if (!svg) return undefined;
+    const onDown = (ev) => {
+      if (ev.button !== 0 || zoomRef.current <= 1) return;
+      const t = ev.target;
+      if (t && t.closest && t.closest('g[data-zone]')) return;
+      const ctm = svg.getScreenCTM();
+      if (!ctm || !ctm.a || !ctm.d) return;
+      ev.preventDefault();
+      const startPan = { x: panRef.current.x, y: panRef.current.y };
+      const x0 = ev.clientX;
+      const y0 = ev.clientY;
+      const perPxX = 1 / ctm.a;
+      const perPxY = 1 / ctm.d;
+      setPanning(true);
+      const onMove = (me) => {
+        setView(zoomRef.current, startPan.x - (me.clientX - x0) * perPxX, startPan.y - (me.clientY - y0) * perPxY);
+      };
+      const onUp = () => {
+        setPanning(false);
+        document.removeEventListener('mousemove', onMove);
+        document.removeEventListener('mouseup', onUp);
+      };
+      document.addEventListener('mousemove', onMove);
+      document.addEventListener('mouseup', onUp);
+    };
+    svg.addEventListener('mousedown', onDown);
+    return () => svg.removeEventListener('mousedown', onDown);
+  }, [setView]);
+
+  const viewW = baseW / zoom;
+  const viewH = baseH / zoom;
+  const round2 = (v) => (Math.abs(v) < 0.005 ? 0 : Math.round(v * 100) / 100);
+  const viewBoxStr = `${round2(baseCx + pan.x - viewW / 2)} ${round2(baseCy + pan.y - viewH / 2)} ${round2(viewW)} ${round2(viewH)}`;
+  const zoomPct = Math.round(zoom * 100);
+
   return (
-    <svg viewBox={uploaded ? `0 0 ${VIEWBOX.w} ${VIEWBOX.h}` : `${PLAN_TIGHT_VIEW.x} ${PLAN_TIGHT_VIEW.y} ${PLAN_TIGHT_VIEW.w} ${PLAN_TIGHT_VIEW.h}`} className={`h-full w-full${bgHidden ? ' focus-mode' : ''}${onlyZones ? ' zones-only' : ''}`} preserveAspectRatio="xMidYMid meet"
+    <>
+    <svg ref={svgRef} viewBox={viewBoxStr} className={`h-full w-full${bgHidden ? ' focus-mode' : ''}${onlyZones ? ' zones-only' : ''}`} preserveAspectRatio="xMidYMid meet"
+      style={{ cursor: panning ? 'grabbing' : (zoom > 1 ? 'grab' : 'default') }}
       role="img" aria-label="잠실점 지하 1층 식품관 평면도">
       <defs>
         <filter id="soft-shadow" x="-8%" y="-8%" width="116%" height="116%">
@@ -3262,6 +3381,43 @@ function FloorPlan({
         </g>
       )}
     </svg>
+
+    {/* 확대·축소 컨트롤 — 뷰어 우하단, 도면 위에 얹는다 */}
+    <div className="absolute bottom-3 right-3 z-20 flex items-center gap-0.5 rounded-xl border border-slate-200 bg-white px-1 py-1 shadow-card">
+      <button
+        type="button"
+        onClick={() => zoomCenter(1 / 1.4)}
+        disabled={zoom <= 1.001}
+        title="축소"
+        aria-label="도면 축소"
+        className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 active:scale-95 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+      >
+        <Icon name="ZoomOut" size={14} stroke={2.2} />
+      </button>
+      <span className="min-w-[38px] select-none text-center text-[10.5px] font-black tabular text-slate-500" aria-live="polite">{`${zoomPct}%`}</span>
+      <button
+        type="button"
+        onClick={() => zoomCenter(1.4)}
+        disabled={zoom >= MAX_ZOOM - 0.001}
+        title="확대"
+        aria-label="도면 확대"
+        className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 active:scale-95 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+      >
+        <Icon name="ZoomIn" size={14} stroke={2.2} />
+      </button>
+      <span className="mx-0.5 h-4 w-px bg-slate-200" />
+      <button
+        type="button"
+        onClick={resetView}
+        disabled={zoom <= 1.001 && Math.abs(pan.x) < 0.01 && Math.abs(pan.y) < 0.01}
+        title="화면에 맞추기"
+        aria-label="도면을 화면에 맞추기"
+        className="flex h-7 w-7 items-center justify-center rounded-lg text-slate-600 transition hover:bg-slate-100 active:scale-95 disabled:cursor-not-allowed disabled:text-slate-300 disabled:hover:bg-transparent"
+      >
+        <Icon name="Maximize" size={13} stroke={2.2} />
+      </button>
+    </div>
+    </>
   );
 }
 
